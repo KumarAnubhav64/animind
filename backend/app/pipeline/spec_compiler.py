@@ -7,8 +7,11 @@ collisions, no missing imports, consistent timing.
 
 import json
 import textwrap
+from pathlib import Path
 
 from app.schemas.spec import SceneSpec, SpecAction
+
+ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 
 COLORS = {
     "blue": "BLUE", "red": "RED", "green": "GREEN", "yellow": "YELLOW",
@@ -275,6 +278,28 @@ class SpecCompiler:
         self.visual_count += 1
         self._anim_line(a, _var(a.id))
 
+    def op_add_asset(self, a: SpecAction):
+        if not a.id:
+            return
+        self._replace_existing(a.id)
+        asset_name = (a.asset or "").lower().replace(" ", "_")
+        asset_path = ASSETS_DIR / f"{asset_name}.svg"
+        if not asset_path.exists():
+            # Fallback to circle if asset not found
+            self.emit(f'{_var(a.id)} = Circle(radius=0.5, color={_color(a.color, "BLUE")})')
+        else:
+            color = _color(a.color, "WHITE")
+            self.emit(f'{_var(a.id)} = SVGMobject("{asset_path}").set_color({color})')
+        scale = a.scale or 1.0
+        if scale != 1.0:
+            self.emit(f'{_var(a.id)}.scale({scale:.2f})')
+        x, y = self._fit_and_place(_var(a.id), a)
+        self.boxes[a.id] = (x, y)
+        self.regions[a.id] = (a.region or "center").lower()
+        self.known.add(a.id)
+        self.visual_count += 1
+        self._anim_line(a, _var(a.id))
+
     def op_add_axes(self, a: SpecAction):
         if not a.id:
             return
@@ -449,7 +474,8 @@ class SpecCompiler:
         ops = {
             "set_title": self.op_set_title, "add_text": self.op_add_text,
             "add_equation": self.op_add_equation, "add_shape": self.op_add_shape,
-            "add_axes": self.op_add_axes, "add_bars": self.op_add_bars,
+            "add_asset": self.op_add_asset, "add_axes": self.op_add_axes,
+            "add_bars": self.op_add_bars,
             "label": self.op_label, "connect": self.op_connect,
             "animate": self.op_animate, "transform": self.op_transform,
             "move": self.op_move, "remove": self.op_remove, "wait": self.op_wait,

@@ -34,7 +34,8 @@ class SpecAction(BaseModel):
     id: str | None = None
     text: str | None = None
     tex: str | None = None
-    shape: str | None = None  # circle|square|dot|triangle|diamond|ring
+    shape: str | None = None  # circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus
+    asset: str | None = None  # pre-made asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book
     color: str | None = None  # blue|red|green|yellow|teal|purple|orange|gold|white|grey|pink
     region: str | None = None  # center|left|right|top|bottom|top_left|top_right|bottom_left|bottom_right
     at: list[float] | None = None  # [x, y] in frame coords (-7..7, -4..4)

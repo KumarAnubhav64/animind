@@ -33,6 +33,7 @@ Available ops (use ONLY these):
 - add_text {id, text, region, color?, scale?, at?:[x,y]}
 - add_equation {id, tex (LaTeX, double-escape backslashes), region, color?, scale?, at?:[x,y]}
 - add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?}
+- add_asset {id, asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book, color?, region or at:[x,y], scale?} — use for recognizable real-world objects
 - add_axes {id, x_range:[min,max,step], y_range:[min,max,step], expr:"x**2", color?, region or at:[x,y]}
 - add_bars {id, values:[...], color?, region or at:[x,y]}
 - label {id, text, target: <existing id>, direction: up|down|left|right}
