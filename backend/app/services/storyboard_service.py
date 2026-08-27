@@ -3,7 +3,7 @@
 from app.agents.studio_graph import run_studio
 from app.config import get_settings
 from app.db.models import Project
-from app.db.repositories import project_repo, scene_repo
+from app.db.repositories import message_repo, project_repo, scene_repo
 from app.pipeline.events import publish
 
 
@@ -23,6 +23,10 @@ async def generate_storyboard(project_id: str):
     if project is None:
         return
     settings = get_settings()
+    # Save user message (the topic)
+    message_repo.create(
+        project_id=project_id, role="user", content=project.topic,
+    )
     await publish(
         project.id,
         {"type": "workflow", "agent": "Studio", "node": "start", "message": "Starting Writer → Director → Producer storyboard review.", "details": {}},
@@ -34,6 +38,7 @@ async def generate_storyboard(project_id: str):
             project.subject,
             project_id=project.id,
         )
+        n_scenes = len(storyboard.scenes[: settings.max_scenes])
         for i, scene_plan in enumerate(storyboard.scenes[: settings.max_scenes]):
             scene_repo.create(
                 project_id=project.id,
@@ -43,20 +48,38 @@ async def generate_storyboard(project_id: str):
                 visual_description=scene_plan.visual_description,
                 status="pending",
             )
+        # Save assistant acknowledgment
+        scene_list = "\n".join(
+            f"{i+1}. **{s.title}** — {s.narration[:80]}..."
+            for i, s in enumerate(storyboard.scenes[:n_scenes])
+        )
+        message_repo.create(
+            project_id=project_id,
+            role="assistant",
+            content=(
+                f"I've planned **{n_scenes} scenes** for your explainer video:\n\n"
+                f"{scene_list}\n\n"
+                "Starting production now — each scene will be rendered as a separate animation."
+            ),
+        )
         await publish(
             project.id,
             {
                 "type": "workflow",
                 "agent": "Studio",
                 "node": "storyboard",
-                "message": f"Storyboard complete with {len(storyboard.scenes[: settings.max_scenes])} production scenes.",
-                "details": {"scenes": len(storyboard.scenes[: settings.max_scenes])},
+                "message": f"Storyboard complete with {n_scenes} production scenes.",
+                "details": {"scenes": n_scenes},
             },
         )
         await publish(project.id, {"type": "storyboard", "project_id": project.id})
     except Exception as error:  # noqa: BLE001
         message = f"{type(error).__name__}: {error}"
         project_repo.update(project.id, status="failed", error=message[:2000])
+        message_repo.create(
+            project_id=project_id, role="assistant",
+            content=f"Sorry, production failed: {message[:500]}",
+        )
         await publish(
             project.id,
             {

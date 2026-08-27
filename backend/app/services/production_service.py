@@ -10,7 +10,7 @@ from pathlib import Path
 from app.agents.scene_graph import run_scene
 from app.config import get_settings
 from app.db.models import Scene
-from app.db.repositories import project_repo, scene_repo
+from app.db.repositories import message_repo, project_repo, scene_repo
 from app.pipeline.events import publish
 from app.pipeline.video import stitch_scenes
 
@@ -454,6 +454,17 @@ async def restitch(project_id: str):
         os.replace(temporary_out, out)
         project_repo.update(
             project_id, status="ready", final_video_path=str(out), error=None
+        )
+        # Save completion message with final video
+        message_repo.create(
+            project_id=project_id,
+            role="assistant",
+            content=(
+                f"Your explainer video is complete! "
+                f"{len(scenes)} scenes stitched together into a final video. "
+                "You can download it below."
+            ),
+            video_path=str(out),
         )
     finally:
         temporary_out.unlink(missing_ok=True)

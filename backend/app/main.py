@@ -9,9 +9,9 @@ from fastapi.responses import FileResponse
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import get_settings
-from app.db import init_db, project_repo, scene_repo
+from app.db import init_db, message_repo, project_repo, scene_repo
 from app.pipeline.events import history, subscribe, unsubscribe
-from app.schemas import ProjectCreate, ProjectOut, SceneOut, SceneUpdate
+from app.schemas import MessageCreate, MessageOut, ProjectCreate, ProjectOut, SceneOut, SceneUpdate
 from app.services import production_service
 from app.services.storyboard_service import create_project as persist_project
 from app.services.storyboard_service import generate_storyboard
@@ -243,3 +243,38 @@ async def video(project_id: str):
     if not path.exists():
         raise HTTPException(404, "Video not ready")
     return FileResponse(path, media_type="video/mp4", filename="animind.mp4")
+
+
+# ---------------------------------------------------------------- chat
+
+
+@app.get("/api/projects/{project_id}/messages", response_model=list[MessageOut])
+async def get_messages(project_id: str):
+    if project_repo.get(project_id) is None:
+        raise HTTPException(404, "Project not found")
+    msgs = message_repo.list_for_project(project_id)
+    return [MessageOut(**m.to_dict()) for m in msgs]
+
+
+@app.post("/api/projects/{project_id}/messages", response_model=MessageOut)
+async def send_message(project_id: str, req: MessageCreate):
+    project = project_repo.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+    if project_id in _active_projects:
+        raise HTTPException(409, "Project production is already running")
+    # Persist the user message
+    message_repo.create(project_id=project_id, role="user", content=req.content)
+    # Trigger production
+    _active_projects.add(project_id)
+
+    async def run():
+        try:
+            await production_service.produce_project(project_id)
+        finally:
+            _active_projects.discard(project_id)
+
+    asyncio.create_task(run())
+    # Return the user message; assistant messages are added during pipeline
+    msgs = message_repo.list_for_project(project_id)
+    return MessageOut(**msgs[-1].to_dict())

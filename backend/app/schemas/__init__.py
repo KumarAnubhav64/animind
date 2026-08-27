@@ -36,6 +36,21 @@ class ProjectCreate(BaseModel):
     subject: str | None = None
 
 
+class MessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
+
+
+class MessageOut(BaseModel):
+    id: str
+    project_id: str
+    role: str
+    content: str
+    scene_id: str | None = None
+    video_path: str | None = None
+    video_available: bool = False
+    created_at: str | None = None
+
+
 class SceneUpdate(BaseModel):
     title: str | None = None
     narration: str | None = None

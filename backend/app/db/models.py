@@ -77,3 +77,27 @@ class Scene(Base):
             "muted": self.audio_path is None,
             "video_available": bool(self.video_path) and Path(self.video_path).exists(),
         }
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    role: Mapped[str] = mapped_column(String)  # user | assistant | system
+    content: Mapped[str] = mapped_column(Text)
+    scene_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    video_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "role": self.role,
+            "content": self.content,
+            "scene_id": self.scene_id,
+            "video_path": self.video_path,
+            "video_available": bool(self.video_path) and Path(self.video_path).exists(),
+            "created_at": str(self.created_at),
+        }

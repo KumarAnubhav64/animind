@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.db.models import Project, Scene
+from app.db.models import Message, Project, Scene
 from app.db.session import make_session
 
 
@@ -67,5 +67,26 @@ class SceneRepository:
             return scene
 
 
+class MessageRepository:
+    def list_for_project(self, project_id: str) -> list[Message]:
+        with make_session() as s:
+            return (
+                s.scalars(
+                    select(Message)
+                    .where(Message.project_id == project_id)
+                    .order_by(Message.created_at)
+                )
+                .all()
+            )
+
+    def create(self, **fields) -> Message:
+        msg = Message(**fields)
+        with make_session() as s:
+            s.add(msg)
+            s.commit()
+            return msg
+
+
 project_repo = ProjectRepository()
 scene_repo = SceneRepository()
+message_repo = MessageRepository()
