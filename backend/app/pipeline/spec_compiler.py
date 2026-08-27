@@ -140,7 +140,12 @@ class SpecCompiler:
         return max(1.2, 2 * hw - 0.45), max(0.7, 2 * hh - 0.35)
 
     def _fit_and_place(self, var: str, action: SpecAction) -> tuple[float, float]:
-        max_width, max_height = self._region_limits(action.region)
+        # When explicit coordinates are given, use full-frame limits (objects
+        # are placed intentionally — don't shrink them to region bounds).
+        if action.at and len(action.at) >= 2:
+            max_width, max_height = 13.5, 7.0  # full frame minus margins
+        else:
+            max_width, max_height = self._region_limits(action.region)
         self.emit(f"_fit({var}, {max_width:.2f}, {max_height:.2f})")
         pos_line, x, y = self._position(action)
         self.emit(f"{var}.{pos_line}")
