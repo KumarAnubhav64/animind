@@ -55,10 +55,12 @@ def _var(mobject_id: str) -> str:
 
 
 def _clean(s: str | None) -> str:
-    """Flatten whitespace/newlines so strings embed safely in single-line code."""
+    """Flatten whitespace/newlines and strip Unicode control characters."""
     if s is None:
         return ""
-    return " ".join(str(s).split()).strip()
+    text = " ".join(str(s).split()).strip()
+    # Remove Unicode control chars (except newline/tab) that break Manim Text()
+    return "".join(c for c in text if ord(c) >= 32 or c in "\n\t")
 
 
 def _literal(value: str) -> str:

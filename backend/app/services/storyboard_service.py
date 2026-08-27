@@ -1,10 +1,17 @@
 """Storyboard service: Writer -> Director -> Producer studio pipeline + persistence."""
 
+import re
+
 from app.agents.studio_graph import run_studio
 from app.config import get_settings
 from app.db.models import Project
 from app.db.repositories import message_repo, project_repo, scene_repo
 from app.pipeline.events import publish
+
+
+def _sanitize_text(text: str) -> str:
+    """Remove Unicode control characters that break Manim Text() rendering."""
+    return "".join(c for c in text if ord(c) >= 32 or c in "\n\t")
 
 
 def create_project(topic: str, audience_level: str, subject: str | None) -> Project:
@@ -43,9 +50,9 @@ async def generate_storyboard(project_id: str):
             scene_repo.create(
                 project_id=project.id,
                 idx=i,
-                title=scene_plan.title,
-                narration=scene_plan.narration,
-                visual_description=scene_plan.visual_description,
+                title=_sanitize_text(scene_plan.title),
+                narration=_sanitize_text(scene_plan.narration),
+                visual_description=_sanitize_text(scene_plan.visual_description),
                 status="pending",
             )
         # Save assistant acknowledgment
