@@ -58,6 +58,8 @@ class Scene(Base):
     audio_path: Mapped[str | None] = mapped_column(String, nullable=True)
     duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     spec_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qa_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    treatment_md: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +70,8 @@ class Scene(Base):
             "narration": self.narration,
             "visual_description": self.visual_description,
             "manim_code": self.manim_code,
+            "spec_json": self.spec_json,
+            "treatment_md": self.treatment_md,
             "status": self.status,
             "error": self.error,
             "attempts": self.attempts,
@@ -76,6 +80,7 @@ class Scene(Base):
             "duration_s": self.duration_s,
             "muted": self.audio_path is None,
             "video_available": bool(self.video_path) and Path(self.video_path).exists(),
+            "qa_warning": self.qa_warning,
         }
 
 

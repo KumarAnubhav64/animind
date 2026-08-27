@@ -255,7 +255,7 @@ async def produce_scene(scene: Scene, context: str = "") -> bool:
         node = event["node"]
         update = event.get("update") or {}
         details = {}
-        for key in ("error", "attempts", "duration_s", "qa_attempts", "math_fixed", "math_issues"):
+        for key in ("error", "attempts", "duration_s", "qa_attempts", "qa_warning", "qa_issues", "math_fixed", "math_issues"):
             if key in update and update[key] is not None:
                 details[key] = update[key]
         await publish(
@@ -272,6 +272,8 @@ async def produce_scene(scene: Scene, context: str = "") -> bool:
         )
 
     try:
+        project = project_repo.get(scene.project_id)
+        project_topic = project.topic if project else ""
         result, _events = await run_scene(
             scene.project_id,
             scene.id,
@@ -280,6 +282,7 @@ async def produce_scene(scene: Scene, context: str = "") -> bool:
             scene.narration,
             scene.visual_description or "",
             context=context,
+            project_topic=project_topic,
             on_update=on_update,
         )
     except Exception as e:  # noqa: BLE001
@@ -304,7 +307,9 @@ async def produce_scene(scene: Scene, context: str = "") -> bool:
         duration_s=result["duration_s"],
         attempts=result["attempts"],
         spec_json=result.get("spec_json"),
+        treatment_md=result.get("treatment_md"),
         error=(result["error"] or "")[:2000] or None,
+        qa_warning=result.get("qa_warning"),
     )
     await _publish_scene_status(
         scene.project_id,
@@ -332,6 +337,8 @@ def _workflow_message(node: str, update: dict) -> str:
     message = messages.get(node, "Working on the scene.")
     if node == "mathcheck" and update.get("math_fixed"):
         message += " Corrections applied to the scene spec and recompiled."
+    if node == "critique" and update.get("qa_warning"):
+        message = f"Visual QA was skipped: {update['qa_warning']}."
     error = update.get("error")
     return f"{message} {error}" if error else message
 

@@ -47,3 +47,8 @@ def init_db():
     if "visual_ledger" not in project_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE projects ADD COLUMN visual_ledger TEXT"))
+
+    columns = {column["name"] for column in inspect(engine).get_columns("scenes")}
+    if "treatment_md" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE scenes ADD COLUMN treatment_md TEXT"))

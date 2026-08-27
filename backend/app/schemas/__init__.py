@@ -64,12 +64,15 @@ class SceneOut(BaseModel):
     narration: str
     visual_description: str | None
     manim_code: str | None
+    spec_json: str | None = None
+    treatment_md: str | None = None
     status: SceneStatus
     error: str | None
     attempts: int
     duration_s: float | None
     muted: bool = False
     video_available: bool = False
+    qa_warning: str | None = None
 
 
 class ProjectOut(BaseModel):

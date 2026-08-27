@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 
+from app.prompts.mayer import MAYER_PRINCIPLES
 from app.schemas import Storyboard
 
 DIRECTOR_SYSTEM_PROMPT = """\
@@ -29,6 +30,8 @@ appears (e.g. "the pathogen is always a red circle, antibodies are always gold")
 Later scenes must reference what earlier scenes established, never redefine it.
 - Stay within the writer's target duration: scenes of roughly equal length.
 - Be mathematically/technically accurate.
+
+{mayer}
 
 Rules — VISUAL TIMELINE (critical for multi-phase scenes):
 - Plan visual_description as a PHASED SEQUENCE, not a single snapshot. Write \
@@ -58,7 +61,19 @@ A yellow circle appears at left." \
 - Example of BAD visual_description: \
 "A waveform appears and then a graph shows the frequency domain." \
 (No positions, no phases, no cleanup — the coder will pile everything in the center.)
-"""
+
+Rules — EXPLANATION QUALITY (how to teach with visuals):
+- Concrete hook: open each scene with a visual that the viewer can immediately \
+grasp (a shape, a motion, a real-world metaphor) before adding labels or equations.
+- Show THEN name: the visual appears first, then the label or equation follows. \
+Never show a label before the object it describes.
+- Build across scenes: Scene 1 = concrete example, Scene 2 = mechanism, \
+Scene 3 = formal rule, Scene 4 = application.  Each scene builds on the last.
+- Contrast: if a misconception exists, show the wrong intuition visually first \
+(e.g. a commonly-believed-but-wrong diagram), then correct it with the right one.
+- End scenes cleanly: remove transient elements so the carry-over state is clear \
+for the next scene.  The viewer should see exactly what persists.
+""".format(mayer=MAYER_PRINCIPLES)
 
 
 def director_user_prompt(outline_json: str, topic: str, audience_level: str, subject: str | None) -> str:

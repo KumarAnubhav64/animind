@@ -126,6 +126,7 @@ class SceneState(TypedDict):
     title: str
     narration: str
     visual_description: str
+    project_topic: str  # overall video topic for visual QA context
     # evolving
     audio_path: str | None
     audio_duration: float | None
@@ -142,6 +143,7 @@ class SceneState(TypedDict):
     qa_exhausted: bool
     context: str
     spec_json: str | None
+    treatment_md: str | None
 
 
 class SceneResult(TypedDict):
@@ -153,6 +155,7 @@ class SceneResult(TypedDict):
     attempts: int
     error: str | None
     spec_json: str | None
+    qa_warning: str | None
 
 
 # ---------------------------------------------------------------- nodes
@@ -202,6 +205,7 @@ async def synth_tts(state: SceneState) -> dict[str, Any]:
 async def generate_spec(state: SceneState) -> dict[str, Any]:
     """Tier 1: declarative SceneSpec -> deterministic Manim code (compiled)."""
     from app.pipeline.spec_compiler import compile_spec
+    from app.pipeline.treatment import generate_treatment
     from app.prompts.spec_coder import (
         SPEC_CODER_SYSTEM_PROMPT,
         SpecCode,
@@ -232,6 +236,7 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
         state["visual_description"] or "",
         state.get("audio_duration"),
         state.get("context") or "",
+        muted=state.get("muted", False),
     )
     parsed: SceneSpec | None = None
     try:
@@ -250,18 +255,54 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
         await _progress(
             f"Structured {len(parsed.beats)} beats into a declarative spec ({len(parsed.beats)} action groups); compiling to Manim code."
         )
+        # Stream the spec JSON to the frontend
+        await _publish(
+            project_id,
+            {
+                "type": "workflow",
+                "scene_id": scene_id,
+                "scene_idx": state.get("scene_idx", 0),
+                "agent": "SpecCoder",
+                "node": "specgen",
+                "message": f"Generated spec with {len(parsed.beats)} beats",
+                "details": {"spec_json": parsed.model_dump_json(indent=2)},
+            },
+        )
         code = compile_spec(parsed, state.get("audio_duration"))
         await _progress("Compiled the declarative spec into deterministic Manim code.")
+        # Stream the compiled code to the frontend
+        await _publish(
+            project_id,
+            {
+                "type": "workflow",
+                "scene_id": scene_id,
+                "scene_idx": state.get("scene_idx", 0),
+                "agent": "SpecCoder",
+                "node": "specgen",
+                "message": f"Compiled spec into {len(code.splitlines())} lines of Manim code",
+                "details": {"compiled_code": code},
+            },
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("scene %s: spec generation failed (%s) — using raw codegen", scene_id, e)
         await _progress("Spec path failed; falling back to raw LLM code generation.")
         result = await generate_code(state)
-        return {**result, "fell_back": True, "spec_json": None}
+        treatment = generate_treatment(
+            state["title"], state["narration"], state.get("visual_description") or "",
+            None, state.get("audio_duration"),
+        )
+        return {**result, "fell_back": True, "spec_json": None, "treatment_md": treatment}
+    spec_json = parsed.model_dump_json()
+    treatment = generate_treatment(
+        state["title"], state["narration"], state.get("visual_description") or "",
+        spec_json, state.get("audio_duration"),
+    )
     return {
         "code": code,
         "status": "rendering",
         "attempts": 1,
-        "spec_json": parsed.model_dump_json(),
+        "spec_json": spec_json,
+        "treatment_md": treatment,
     }
 
 
@@ -339,6 +380,7 @@ async def generate_code(state: SceneState, feedback: str = "") -> dict[str, Any]
         state["visual_description"] or "",
         state.get("audio_duration"),
         state.get("context") or "",
+        muted=state.get("muted", False),
     )
     response = await llm_with_retry(
         coder_llm(),
@@ -368,6 +410,7 @@ async def fix_code(state: SceneState) -> dict[str, Any]:
                     state["error"] or "",
                     state["attempts"],
                     state.get("context") or "",
+                    muted=state.get("muted", False),
                 ),
             ),
         ],
@@ -413,7 +456,8 @@ async def critique_node(state: SceneState) -> dict[str, Any]:
         return {"critiqued": True, "error": None}
     qa_attempts = state.get("qa_attempts", 0) + 1
     verdict = await critique_scene(
-        state["video_path"], state["narration"], state.get("visual_description") or ""
+        state["video_path"], state["narration"], state.get("visual_description") or "",
+        project_topic=state.get("project_topic", ""),
     )
     updates: dict[str, Any] = {
         "critiqued": True,
@@ -425,9 +469,13 @@ async def critique_node(state: SceneState) -> dict[str, Any]:
         issues = "; ".join(verdict.issues[:3])
         logger.warning("scene %s: vision critique rejected — %s", state["scene_id"], issues)
         updates["error"] = f"visual QA rejected the animation: {issues}"
+        updates["qa_issues"] = verdict.issues
         if qa_attempts >= settings.vision_max_attempts or state["attempts"] >= settings.max_scene_retries:
             updates["qa_exhausted"] = True
             logger.warning("scene %s: visual QA exhausted after %s attempt(s)", state["scene_id"], qa_attempts)
+    elif verdict.skipped_reason:
+        logger.warning("scene %s: visual QA skipped — %s", state["scene_id"], verdict.skipped_reason)
+        updates["qa_warning"] = verdict.skipped_reason
     return updates
 
 
@@ -593,6 +641,7 @@ async def run_scene(
     narration: str,
     visual_description: str,
     context: str = "",
+    project_topic: str = "",
     on_update: Callable[[dict], Awaitable[None]] | None = None,
 ) -> tuple[SceneResult, list[dict]]:
     """Run the scene pipeline. Returns (result, step_events)."""
@@ -605,6 +654,7 @@ async def run_scene(
         "narration": narration,
         "visual_description": visual_description,
         "context": context,
+        "project_topic": project_topic,
         "audio_path": None,
         "audio_duration": None,
         "muted": False,
@@ -619,6 +669,7 @@ async def run_scene(
         "qa_attempts": 0,
         "qa_exhausted": False,
         "spec_json": None,
+        "treatment_md": None,
     }
 
     final_state: SceneState = {**initial}
@@ -647,4 +698,5 @@ def _as_result(state: dict, events: list[dict]) -> SceneResult:
         "error": state.get("error"),
     }
     result["spec_json"] = state.get("spec_json")
+    result["qa_warning"] = state.get("qa_warning")
     return result

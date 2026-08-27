@@ -14,7 +14,10 @@ Before writing any beats, define a layout field with named regions. This forces 
 you to decide WHERE things go before WHAT they are.
 
 The Manim frame is a coordinate plane: x ∈ [-7, 7], y ∈ [-4, 4]. \
-The title bar occupies y ≥ 2.4 — never place content there.
+The title bar occupies y ≥ 2.4 — never place content there. \
+When the scene has no audio, narration subtitles are burned into the bottom of the \
+frame, so the bottom band (y < -2.5) is covered by the caption bar — never place \
+labels or key content there; keep content in y ∈ [-2.5, 2.2].
 
 Common layouts:
 - Side-by-side: {"regions": [{"name": "left_area", "area": "left", "at": [-3.4, 0]}, \
@@ -40,7 +43,9 @@ Available ops (use ONLY these):
 - connect {id, from: <existing id>, to: <existing id>, color?}
 - animate {target: <id>|all, anim: write|fade_in|create|grow|indicate|circumscribe|flash|fade_out}
 - transform {id, tex or text} — morph an existing mobject into new content
-- move {id, region or at:[x,y]}
+- move {id, region or at:[x,y], seconds?} — reposition an object (default 2.0s)
+- rotate {id, turns, seconds?} — spin an object; turns 1.0 = one full rotation (linear). THE motion op for phasors, gears, spinning diagrams.
+- pulse {target: <id>|all} — quick scale up/down to draw the eye to something
 - remove {target: <id>|all}
 - wait {seconds}
 
@@ -71,6 +76,10 @@ Rules — SPATIAL PRECISION (every object must have an explicit position):
 Rules — SPATIAL LAYOUT (critical for consistency):
 - Define layout regions first, then place actions within those regions.
 - For side-by-side scenes: put left-half objects at x ∈ [-5, -2], right-half at x ∈ [2, 5].
+- BALANCED COMPOSITION: distribute content across the frame. If the main content is on the \
+  left, put labels/equations on the right. Never pile everything into one quadrant — \
+  the bottom-right quadrant should not be empty if the upper-left is full. Aim for \
+  visual weight distributed roughly evenly across the 14x8 frame.
 - Objects in the same beat that should be side-by-side MUST use explicit at:[x,y] \
   with at least 2.0 horizontal spacing. Never rely on region auto-spread for \
   multi-object layouts.
@@ -78,6 +87,32 @@ Rules — SPATIAL LAYOUT (critical for consistency):
   projection), place them at the same y-level or using matching y_range.
 - Labels attach to their parent via the label op with direction; never add_text \
   directly above/below another object.
+
+Rules — MOTION DESIGN (a static slide is a failure; 3B1B videos MOVE):
+- Almost every beat must contain motion: rotate an arrow/vector as the narration \
+  says "rotates/spins/sweeps", move a dot along a path, pulse the object the \
+  narration is talking about, or transform one diagram into another.
+- rotatables (arrows, vector lines, phasors, circles around a point) are \
+  powered by `rotate {id, turns, seconds}` — use it whenever the narration \
+  describes circular/spinning motion.
+- Do NOT leave the same static diagram on screen for multiple beats: between \
+  beats, rotate, pulse, move, or transform something. Static stacking of shapes \
+  is the #1 reason renders get rejected for "no motion design".
+- Timeline pace: each beat's visuals should keep moving ~1-2 seconds after the \
+  narration point lands, then cut cleanly (move/pulse/rotate) into the next idea.
+
+Rules — SCALING (the #1 cause of ugly frames is undersized content):
+- scale is RELATIVE: scale 1.0 = a SMALL accent. A circle at scale 1.0 has
+  radius ~0.9 Manim units — nearly invisible on a 14x8 frame.
+- A HERO element (the main diagram of the beat) needs scale 2.0-3.0, or better:
+  place it in a region WITHOUT at:[x,y] and the compiler grows it to fill that
+  region automatically. center/left/right regions are large; use them for heroes.
+- When you DO give at:[x,y], also give scale >= 1.5 so the object reads clearly.
+- Small markers (dots, tick labels) stay at scale ~0.5-1.0.
+- Two objects that should look comparable in size (e.g. a circle and its
+  projection) must use the SAME scale value, not "guess one slightly bigger".
+- NEVER let a hero object fit in a corner: if an element is the subject of the
+  narration, it belongs in a big region (center/left/right), not at a tiny offset.
 
 Rules — 3D SHAPES (use for physics, geometry, spatial topics):
 - Use 3D shapes when the concept involves physical objects or 3D space: \
@@ -88,15 +123,26 @@ Rules — 3D SHAPES (use for physics, geometry, spatial topics):
 - For topics about gravity, orbits, waves, or spacetime — always use 3D shapes.
 - 3D shapes support the same color and at:[x,y] placement as 2D shapes.
 
-Rules — EXPLANATION QUALITY (multimedia learning principles):
+Rules — EXPLANATION QUALITY (Mayer's multimedia-learning principles):
 - Segmenting: each beat = exactly ONE idea. If a beat's description contains "and", \
   split it into two beats.
 - Signaling: end most beats by highlighting the key object (animate indicate/circumscribe) \
   so the eye lands where the narration points.
 - Weeding: if an element doesn't support the current beat's idea, remove it (remove all) \
   before starting the next idea. Never leave 6+ objects on screen.
-- Build an argument across beats: concrete hook -> mechanism -> formalize -> takeaway.
+- Build an argument across beats: concrete hook -> mechanism -> formalise -> takeaway.
 - The visuals must SHOW what the narration SAYS at that moment, not the whole scene at once.
+- Coherence: remove anything that does not directly support the current idea.  No \
+  decorative shapes, no filler text, no objects unrelated to the beat.
+- Spatial contiguity: labels MUST be adjacent to the object they describe (use the \
+  label op, direction toward the object).  Never place a label far from its referent.
+- Temporal contiguity: the visual must appear WHEN the narration mentions it, not \
+  before or after.  Pace beats so the animation lands with the spoken idea.
+- Multimedia: pair every verbal claim with a visual counterpart.  A number in \
+  narration -> bars or equation on screen.  A process -> arrows.  A comparison -> \
+  left vs right.
+- Redundancy: do NOT show the same text on screen AND narrate it.  The voice carries \
+  the explanation; the visual carries the evidence.
 
 Rules:
 - First beat: set_title, then a hook element. Every key object gets an id; \
@@ -140,7 +186,8 @@ EXAMPLE 1 — Unit Circle → Sine Wave (side-by-side, phased):
 Director says: "A point travels around a unit circle on the left; its vertical
 coordinate is plotted as a sine wave on the right."
 
-GOOD SceneSpec:
+GOOD SceneSpec (hero circle placed in the big left region WITHOUT at, so the
+compiler grows it to fill; small dot keeps a small scale):
 {
   "title": "Unit Circle and Sine Wave",
   "layout": {
@@ -152,8 +199,8 @@ GOOD SceneSpec:
   "beats": [
     {"actions": [
       {"op": "set_title", "text": "Unit Circle and Sine Wave"},
-      {"op": "add_axes", "id": "circle_axes", "x_range": [-1.5, 1.5, 0.5], "y_range": [-1.5, 1.5, 0.5], "at": [-3.4, 0], "color": "grey"},
-      {"op": "add_shape", "id": "unit_circle", "shape": "circle", "color": "blue", "at": [-3.4, 0], "scale": 1.0}
+      {"op": "add_shape", "id": "unit_circle", "shape": "circle", "color": "blue", "region": "circle_area"},
+      {"op": "add_axes", "id": "circle_axes", "x_range": [-1.5, 1.5, 0.5], "y_range": [-1.5, 1.5, 0.5], "at": [-3.4, 0], "color": "grey"}
     ]},
     {"actions": [
       {"op": "add_axes", "id": "wave_axes", "x_range": [0, 6.5, 1.57], "y_range": [-1.5, 1.5, 0.5], "at": [3.4, 0], "color": "grey"},
@@ -217,6 +264,44 @@ GOOD SceneSpec:
   ]
 }
 
+EXAMPLE 4 — Spinning phasor (continuous motion, not a static diagram):
+Director says: "An arrow spins around a circle; its tip traces e to the i omega t."
+
+GOOD SceneSpec (arrow spins via rotate — a rotating diagram, not a frozen slide):
+{
+  "title": "The Spinning Arrow",
+  "layout": {
+    "regions": [
+      {"name": "circle_area", "area": "left", "at": [-3.4, 0]},
+      {"name": "eq_area", "area": "right", "at": [3.4, 0]}
+    ]
+  },
+  "beats": [
+    {"actions": [
+      {"op": "set_title", "text": "The Spinning Arrow"},
+      {"op": "add_shape", "id": "unit_circle", "shape": "circle", "color": "blue", "region": "circle_area"},
+      {"op": "add_shape", "id": "vector", "shape": "dot", "color": "yellow", "at": [-2.4, 0], "scale": 1.8},
+      {"op": "connect", "id": "radius", "from_id": "unit_circle", "to_id": "vector", "color": "yellow"}
+    ]},
+    {"actions": [
+      {"op": "rotate", "id": "vector", "turns": 2, "seconds": 4},
+      {"op": "add_equation", "id": "e_label", "tex": "e^{i\\omega t}", "color": "white", "at": [3.4, 0], "scale": 1.6}
+    ]}
+  ]
+}
+
+BAD SceneSpec (static — shapes just sit there, zero motion):
+{
+  "title": "The Spinning Arrow",
+  "beats": [
+    {"actions": [
+      {"op": "add_shape", "id": "circle", "shape": "circle", "color": "blue", "at": [-3.4, 0]},
+      {"op": "add_shape", "id": "dot", "shape": "dot", "color": "yellow", "at": [-2.4, 0]},
+      {"op": "add_equation", "id": "eq", "tex": "e^{i\\omega t}", "at": [3.4, 0]}
+    ]}
+  ]
+}
+
 EXAMPLE 3 — Phased build-up (introduce → transform → highlight):
 Director says: "Start with a simple equation, then transform step by step into
 the final form."
@@ -254,11 +339,20 @@ def spec_coder_user_prompt(
     visual_description: str,
     audio_duration_s: float | None,
     context: str = "",
+    muted: bool = False,
 ) -> str:
     duration = (
         f"{audio_duration_s:.1f} seconds"
         if audio_duration_s
         else "unknown (~25 seconds)"
+    )
+    muted_note = (
+        "\nThis scene is MUTED (no audio): narration subtitles are burned into the "
+        "bottom of the frame, so the bottom band (y < -2.5) is covered by the caption "
+        "bar. Keep all labels and content above y = -2.5; never place a label in the "
+        "bottom region.\n"
+        if muted
+        else ""
     )
     continuity = ""
     if context:
@@ -298,6 +392,7 @@ def spec_coder_user_prompt(
         f"Voiceover narration:\n{narration}\n\n"
         f"Director's visual intent:\n{visual_description}\n\n"
         f"Narration audio duration: {duration} — pace beats to fill it.\n"
+        f"{muted_note}"
         f"{continuity}"
         f"{spatial_hints}\n"
         "Step 1: Define your layout regions (the spatial blueprint).\n"

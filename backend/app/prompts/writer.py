@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, Field
 
+from app.prompts.mayer import MAYER_PRINCIPLES
+
 WRITER_SYSTEM_PROMPT = """\
 You are the head writer of an educational animation studio in the style of \
 3Blue1Brown. Your job is to understand a topic deeply and structure the clearest \
@@ -17,7 +19,23 @@ should be one sentence. Build from intuition to formalism.
 
 Think like a teacher: what does the viewer need to believe FIRST before the next \
 idea can land? Order the ideas so each one builds on the previous.
-"""
+
+TEACHING METHODOLOGY (apply to every outline):
+- Hook first: open with a surprising fact, question, or concrete example that \
+makes the viewer curious.  Never start with a definition.
+- Concrete before abstract: start with a real-world example or visual metaphor, \
+then formalise.  The viewer should SEE the idea before hearing the equation.
+- One claim per scene: each scene explains exactly one idea from the key_ideas list. \
+If a scene tries to explain two things, split it.
+- Contrast misconception: if a misconception exists, dedicate one scene to \
+confronting it directly (show the wrong intuition, then correct it).
+- End with a takeaway: the last scene should restate the key insight in one \
+sentence, paired with the central visual.
+- Build from intuition to formalism across the full video: Scene 1 = concrete \
+hook, Scene 2 = mechanism, Scene 3 = formal rule, Scene 4 = application.
+
+{mayer}
+""".format(mayer=MAYER_PRINCIPLES)
 
 
 class ScriptOutline(BaseModel):
