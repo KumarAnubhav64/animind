@@ -2,6 +2,8 @@
 emits the Manim code. This eliminates API hallucinations and layout bugs by
 construction."""
 
+from __future__ import annotations
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -44,6 +46,7 @@ class SpecAction(BaseModel):
     to: str | None = None  # connect endpoint
     anim: str | None = None
     seconds: float | None = None
+    turns: float | None = None  # full rotations for rotate op (1.0 = one full turn)
     x_range: list[float] | None = None
     y_range: list[float] | None = None
     expr: str | None = None  # python lambda body in variable x, e.g. "x**2"
@@ -63,3 +66,77 @@ class SceneSpec(BaseModel):
     beats: list[SpecBeat] = Field(
         description="4-8 beats; each beat is one narration thought with its visual actions"
     )
+
+    def validate_ids(self) -> list[str]:
+        """Check that every object has an id and every reference points to a
+        known id.  Returns a list of human-readable issue strings (empty =
+        valid)."""
+        issues: list[str] = []
+        defined: set[str] = set()
+        for bi, beat in enumerate(self.beats):
+            for ai, action in enumerate(beat.actions):
+                op = action.op
+                # add_* ops MUST have an id
+                if op.startswith("add_") and action.id:
+                    defined.add(action.id)
+                elif op.startswith("add_") and not action.id:
+                    issues.append(
+                        f"beat {bi + 1} action {ai + 1}: {op} is missing an 'id' — "
+                        "every object must have an id so it can be referenced later"
+                    )
+                # connect needs both endpoints
+                if op == "connect":
+                    fid = action.from_id
+                    tid = action.to
+                    if not fid:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: connect is missing 'from' "
+                            "(the source object id)"
+                        )
+                    elif fid not in defined:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: connect 'from' = "
+                            f"'{fid}' but no object with that id has been defined yet"
+                        )
+                    if not tid:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: connect is missing 'to' "
+                            "(the target object id)"
+                        )
+                    elif tid not in defined:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: connect 'to' = "
+                            f"'{tid}' but no object with that id has been defined yet"
+                        )
+                # animate/rotate/move/transform/remove need a target or id
+                if op in ("animate", "rotate", "move", "transform", "remove"):
+                    ref = action.target or action.id
+                    if not ref:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: {op} has no 'target' "
+                            "— must reference an existing object id"
+                        )
+                    elif ref not in defined and ref != "all":
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: {op} target = "
+                            f"'{ref}' but no object with that id has been defined yet"
+                        )
+                # track ids defined by transform (it changes an existing object)
+                if op == "transform" and action.id:
+                    defined.add(action.id)
+        return issues
+
+    def dump_clean_json(self, indent: int | None = None) -> str:
+        """Dump spec as JSON with null fields stripped for readability."""
+        import json
+
+        def _strip_nulls(obj):
+            if isinstance(obj, dict):
+                return {k: _strip_nulls(v) for k, v in obj.items() if v is not None}
+            if isinstance(obj, list):
+                return [_strip_nulls(item) for item in obj]
+            return obj
+
+        raw = self.model_dump()
+        cleaned = _strip_nulls(raw)
+        return json.dumps(cleaned, indent=indent)

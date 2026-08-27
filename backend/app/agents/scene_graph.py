@@ -239,19 +239,42 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
         muted=state.get("muted", False),
     )
     parsed: SceneSpec | None = None
+    max_spec_retries = 2
+    spec_issues: list[str] = []
     try:
         await _progress(
             "Reading narration and continuity context to plan the scene's beats, objects, and visual layout."
         )
-        parsed = await structured_call(
-            coder_llm(),
-            [
-                ("system", SPEC_CODER_SYSTEM_PROMPT),
-                ("human", msg + '\n\nReturn a single JSON object with keys "title" and "beats".'),
-            ],
-            SceneSpec,
-            project_id=project_id,
-        )
+        # Generate spec with validation retry loop
+        for spec_attempt in range(max_spec_retries + 1):
+            human_msg = msg + '\n\nReturn a single JSON object with keys "title" and "beats".'
+            if spec_attempt > 0:
+                human_msg += (
+                    "\n\nCRITICAL FIXES REQUIRED — your previous spec had these errors:\n"
+                    + "\n".join(f"- {iss}" for iss in spec_issues)
+                    + "\n\nYou MUST fix every issue above. Re-emit the FULL corrected spec."
+                )
+            parsed = await structured_call(
+                coder_llm(),
+                [
+                    ("system", SPEC_CODER_SYSTEM_PROMPT),
+                    ("human", human_msg),
+                ],
+                SceneSpec,
+                project_id=project_id,
+            )
+            spec_issues = parsed.validate_ids()
+            if not spec_issues:
+                break
+            if spec_attempt < max_spec_retries:
+                await _progress(
+                    f"Spec had {len(spec_issues)} issue(s) (attempt {spec_attempt + 1}/{max_spec_retries + 1}); retrying with corrections."
+                )
+        if spec_issues:
+            logger.warning(
+                "scene %s: spec still has %s issues after %s retries — proceeding anyway",
+                scene_id, len(spec_issues), max_spec_retries,
+            )
         await _progress(
             f"Structured {len(parsed.beats)} beats into a declarative spec ({len(parsed.beats)} action groups); compiling to Manim code."
         )
@@ -265,7 +288,7 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                 "agent": "SpecCoder",
                 "node": "specgen",
                 "message": f"Generated spec with {len(parsed.beats)} beats",
-                "details": {"spec_json": parsed.model_dump_json(indent=2)},
+                "details": {"spec_json": parsed.dump_clean_json(indent=2)},
             },
         )
         code = compile_spec(parsed, state.get("audio_duration"))
@@ -292,7 +315,7 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
             None, state.get("audio_duration"),
         )
         return {**result, "fell_back": True, "spec_json": None, "treatment_md": treatment}
-    spec_json = parsed.model_dump_json()
+    spec_json = parsed.dump_clean_json()
     treatment = generate_treatment(
         state["title"], state["narration"], state.get("visual_description") or "",
         spec_json, state.get("audio_duration"),
@@ -365,7 +388,7 @@ async def mathcheck(state: SceneState) -> dict[str, Any]:
         )
         return {"math_checked": True, "math_fixed": True}
     return {
-        "spec_json": spec.model_dump_json(),
+        "spec_json": spec.dump_clean_json(),
         "code": code,
         "math_checked": True,
         "math_fixed": True,

@@ -54,6 +54,15 @@ CRITICAL RULES (violations will produce bad visuals):
 2. MATH FORMULAS → add_equation ONLY. Any equation, formula, or mathematical expression MUST use add_equation with tex field. NEVER use add_text for math.
 3. LaTeX in tex field: double-escape backslashes. Example: "p = m v" for $p = mv$. Subscripts: "p_\\{total\\}". Greek: "\\alpha", "\\beta".
 
+CRITICAL RULE — EVERY OBJECT MUST HAVE AN ID:
+- Every add_shape, add_asset, add_equation, add_axes, add_bars, add_text action MUST have an "id" field.
+- IDs are short lowercase words: circle, dot, arrow1, eq1, wave_axes, radius, etc.
+- You CANNOT reference an object in connect, animate, rotate, move, transform, or remove without first giving it an id in an add_* action.
+- connect requires "from" (source id) and "to" (target id) — both must reference ids you already defined.
+- animate/rotate/move/remove require "target" (the id of the object to act on) or "id" — both must reference an id you already defined.
+- If you need to reference an object later, plan its id BEFORE the beat where you create it. Write the id in the first beat, reuse it in later beats.
+- The validator will REJECT your spec if any add_* op lacks an id, or if any reference points to a non-existent id. This will cause a retry and waste tokens.
+
 Rules — PHASED TIMELINE (critical for multi-step scenes):
 - NEVER place all objects in the first beat. Break the scene into phases:
   Phase 1: introduce first elements → Phase 2: remove/move old elements, add new ones.
@@ -208,7 +217,7 @@ compiler grows it to fill; small dot keeps a small scale):
     ]},
     {"actions": [
       {"op": "add_shape", "id": "dot", "shape": "dot", "color": "yellow", "at": [-2.4, 0], "scale": 1.5},
-      {"op": "connect", "id": "radius_line", "from_id": "unit_circle", "to_id": "dot", "color": "blue"}
+      {"op": "connect", "id": "radius_line", "from": "unit_circle", "to": "dot", "color": "blue"}
     ]},
     {"actions": [
       {"op": "add_equation", "id": "sine_curve", "tex": "y = \\sin(\\theta)", "color": "yellow", "at": [3.4, 0]}
@@ -258,8 +267,8 @@ GOOD SceneSpec:
       {"op": "add_label", "id": "verb_label", "text": "Verb", "target": "verb", "direction": "down"}
     ]},
     {"actions": [
-      {"op": "connect", "id": "arrow1", "from_id": "subject", "to_id": "object", "color": "white"},
-      {"op": "connect", "id": "arrow2", "from_id": "object", "to_id": "verb", "color": "white"}
+      {"op": "connect", "id": "arrow1", "from": "subject", "to": "object", "color": "white"},
+      {"op": "connect", "id": "arrow2", "from": "object", "to": "verb", "color": "white"}
     ]}
   ]
 }
@@ -281,7 +290,7 @@ GOOD SceneSpec (arrow spins via rotate — a rotating diagram, not a frozen slid
       {"op": "set_title", "text": "The Spinning Arrow"},
       {"op": "add_shape", "id": "unit_circle", "shape": "circle", "color": "blue", "region": "circle_area"},
       {"op": "add_shape", "id": "vector", "shape": "dot", "color": "yellow", "at": [-2.4, 0], "scale": 1.8},
-      {"op": "connect", "id": "radius", "from_id": "unit_circle", "to_id": "vector", "color": "yellow"}
+      {"op": "connect", "id": "radius", "from": "unit_circle", "to": "vector", "color": "yellow"}
     ]},
     {"actions": [
       {"op": "rotate", "id": "vector", "turns": 2, "seconds": 4},
