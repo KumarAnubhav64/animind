@@ -46,8 +46,24 @@ Available ops (use ONLY these):
 - move {id, region or at:[x,y], seconds?} — reposition an object (default 2.0s)
 - rotate {id, turns, seconds?} — spin an object; turns 1.0 = one full rotation (linear). THE motion op for phasors, gears, spinning diagrams.
 - pulse {target: <id>|all} — quick scale up/down to draw the eye to something
-- remove {target: <id>|all}
+- remove {target: <id>|all} — remove a specific object, or all objects
+- clear — erase the entire canvas and start fresh. Use this when the scene
+  shifts to a COMPLETELY NEW diagram (e.g. "now let's look at a different
+  concept"). clear fades out everything, pauses briefly, then the next beat
+  builds a new diagram from scratch. Do NOT use clear if the new diagram
+  builds on or relates to the previous one — use remove on specific objects
+  instead.
 - wait {seconds}
+
+CRITICAL RULE — USE clear BETWEEN UNRELATED DIAGRAMS:
+- If the narration shifts to a new topic or a different visual metaphor,
+  put a clear action at the start of the new beat BEFORE adding new objects.
+- Example: Beat 1-3 show a unit circle diagram. Beat 4 shifts to "now let's
+  look at a Fourier series". Beat 4 starts with {"op": "clear"}, then adds
+  new objects for the Fourier diagram.
+- Do NOT clear between beats that share objects or build on each other.
+- Do NOT use clear in the first beat (the title beat). clear is only for
+  mid-scene transitions to unrelated diagrams.
 
 CRITICAL RULES (violations will produce bad visuals):
 1. REAL-WORLD OBJECTS → add_asset ONLY. Cars, people, apples, buildings, earth, stars, hearts, gears, books, lightning MUST use add_asset. NEVER approximate with circle/square.

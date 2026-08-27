@@ -32,10 +32,11 @@ class Settings(BaseSettings):
     codegen_mode: str = "spec"  # spec (declarative, compiled) | raw (LLM writes Manim)
     tts_enabled: bool = True
     vision_model: str = "claude-opus-4-8"
+    vision_model_fallback: str | None = None  # Groq vision-capable model (e.g. qwen/qwen3.8-27b) when the primary vision model is down
     vision_critique: bool = True  # screenshot-based visual QA before accepting a scene
     vision_max_frames: int = 3
     vision_frame_width: int = 480
-    vision_max_attempts: int = 2  # inspect the original plus one repaired candidate
+    vision_max_attempts: int = 3  # inspect the original plus up to two repaired candidates
     router_api_key: str | None = None  # AgentRouter (OpenAI-compatible)
     router_base_url: str = "https://agentrouter.org/v1"
     sequential_scenes: bool = True  # roll context forward scene-to-scene (quality > speed)

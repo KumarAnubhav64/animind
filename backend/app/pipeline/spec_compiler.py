@@ -27,11 +27,11 @@ REGIONS = {
     "left": (-3.4, -0.4, 2.6, 1.9),
     "right": (3.4, -0.4, 2.6, 1.9),
     "top": (0.0, 1.4, 4.5, 0.9),
-    "bottom": (0.0, -2.5, 4.5, 0.8),
+    "bottom": (0.0, -1.9, 4.5, 0.7),
     "top_left": (-3.4, 1.3, 2.6, 0.9),
     "top_right": (3.4, 1.3, 2.6, 0.9),
-    "bottom_left": (-3.4, -2.4, 2.6, 0.8),
-    "bottom_right": (3.4, -2.4, 2.6, 0.8),
+    "bottom_left": (-3.4, -1.9, 2.6, 0.7),
+    "bottom_right": (3.4, -1.9, 2.6, 0.7),
 }
 
 # In-region slot offsets as fractions of (half_width, half_height): a 3x3 grid
@@ -140,9 +140,18 @@ class SpecCompiler:
                 return 0.95 * scale, 0.95 * scale
             if shape in {"sphere", "cube", "cylinder", "cone", "torus"}:
                 return 0.95 * scale, 0.95 * scale
-            return 1.0 * scale, 1.0 * scale  # circle, square, triangle, diamond
+            base = 1.0 * scale
+            if not (action.at and len(action.at) >= 2):
+                # Region-placed shapes grow to fill the region (see _fit fill).
+                _, _, hw, hh = REGIONS.get((action.region or "center").lower(), REGIONS["center"])
+                base = max(base, min(2 * hw - 0.45, 2 * hh - 0.35) / 2.0)
+            return base, base  # circle, square, triangle, diamond
         if op == "add_asset":
-            return 0.6 * scale, 0.6 * scale
+            base = 0.6 * scale
+            if not (action.at and len(action.at) >= 2):
+                _, _, hw, hh = REGIONS.get((action.region or "center").lower(), REGIONS["center"])
+                base = max(base, min(2 * hw - 0.45, 2 * hh - 0.35) / 2.0)
+            return base, base
         if op in {"add_axes", "add_bars"}:
             return 1.8, 1.4
         if op == "add_char_table":
@@ -224,10 +233,22 @@ class SpecCompiler:
         # When explicit coordinates are given, use full-frame limits (objects
         # are placed intentionally — don't shrink them to region bounds).
         if action.at and len(action.at) >= 2:
-            max_width, max_height = 13.5, 7.0  # full frame minus margins
+            # Text elements need tighter width limits to prevent edge cutoff
+            max_width = 11.0 if action.op in ("add_text", "add_equation") else 13.5
+            max_height = 7.0
         else:
             max_width, max_height = self._region_limits(action.region)
-        self.emit(f"_fit({var}, {max_width:.2f}, {max_height:.2f})")
+        # Region-placed geometric shapes grow to fill their region (the hero
+        # diagram should dominate, not sit as a small accent). Dots stay small —
+        # they are markers. Explicit at:[x,y] keeps the author's intended size.
+        fill = (
+            action.op in ("add_shape", "add_asset")
+            and not (action.at and len(action.at) >= 2)
+            and (action.shape or "circle").lower() != "dot"
+        )
+        self.emit(
+            f"_fit({var}, {max_width:.2f}, {max_height:.2f}{', True' if fill else ''})"
+        )
         pos_line, x, y = self._position(action)
         self.emit(f"{var}.{pos_line}")
         self.emit(f"_keep_in_frame({var})")
@@ -246,7 +267,9 @@ class SpecCompiler:
         self.regions.pop(mobject_id, None)
         self.bbox_extents.pop(mobject_id, None)
 
-    # Frame is 14.22 x 8 units; title owns everything above y=2.2.
+    # Frame is 14.22 x 8 units; title owns everything above y=2.2, and
+    # the bottom band (y < -2.5) is where burned-in narration subtitles
+    # land, so content must stay above it.
     def _clamp(self, x: float, y: float, action: SpecAction) -> tuple[float, float]:
         op = action.op
         if op == "add_shape":
@@ -259,7 +282,7 @@ class SpecCompiler:
             margin = min(len(content) * size * 0.004, 4.0) + 0.5
         xmax = max(7.11 - margin, 1.5)
         ymax = max(2.2 - (margin * 0.5), 1.0)
-        ymin = -3.6 + (margin * 0.4)
+        ymin = -2.5 + (margin * 0.4)
         return min(max(x, -xmax), xmax), min(max(y, ymin), ymax)
 
     def _anim_line(self, action: SpecAction, expr: str, default_rt: float = 1.0):
@@ -268,7 +291,7 @@ class SpecCompiler:
         parts = [p.strip() for p in expr.split(",") if p.strip()]
         target = f"VGroup({', '.join(parts)})" if len(parts) > 1 else expr
         anim = (action.anim or DEFAULT_ANIM.get(action.op, "fade_in")).lower()
-        rt = {"write": 1.2, "create": 1.5, "grow": 0.8, "fade_in": 0.8}.get(anim, default_rt)
+        rt = {"write": 2.0, "create": 2.0, "grow": 2.0, "fade_in": 2.0}.get(anim, default_rt)
         anim_map = {
             "write": f"self.play(Write({target}), run_time={rt})",
             "create": f"self.play(Create({target}), run_time={rt})",
@@ -282,11 +305,11 @@ class SpecCompiler:
     def op_set_title(self, a: SpecAction):
         text = _literal(_clean(a.text or self.spec.title))
         self.emit(
-            f"title = Text({text}, font_size=40, weight=BOLD)"
+            f"title = Text({text}, font_size=36, weight=BOLD)"
         )
-        self.emit("_fit(title, 13.0, 0.72)")
+        self.emit("_fit(title, 11.0, 0.72)")
         self.emit("title.to_edge(UP, buff=0.3)")
-        self.emit("self.play(Write(title), run_time=1.2)", 1.2)
+        self.emit("self.play(Write(title), run_time=2.0)", 2.0)
 
     def op_add_text(self, a: SpecAction):
         if not a.id or a.text is None:
@@ -488,10 +511,10 @@ class SpecCompiler:
         exprs = ", ".join(_var(t) for t in targets)
         target = f"VGroup({exprs})" if len(targets) > 1 else exprs
         anims = {
-            "indicate": f"self.play(Indicate({target}), run_time=1.2)",
-            "circumscribe": f"self.play(Circumscribe({target}), run_time=1.5)",
-            "flash": f"self.play(Flash({target}.get_center()), run_time=0.8)",
-            "fade_out": f"self.play(FadeOut({target}), run_time=0.8)",
+            "indicate": f"self.play(Indicate({target}), run_time=2.0)",
+            "circumscribe": f"self.play(Circumscribe({target}), run_time=2.0)",
+            "flash": f"self.play(Flash({target}.get_center()), run_time=1.2)",
+            "fade_out": f"self.play(FadeOut({target}), run_time=1.5)",
         }
         if anim in ("fade_out",):
             for t in targets:
@@ -500,7 +523,7 @@ class SpecCompiler:
                 self.regions.pop(t, None)
         line = anims.get(anim)
         if line:
-            self.emit(line, {"indicate": 1.2, "circumscribe": 1.5, "flash": 0.8, "fade_out": 0.8}[anim])
+            self.emit(line, {"indicate": 2.0, "circumscribe": 2.0, "flash": 1.2, "fade_out": 1.5}[anim])
 
     def op_transform(self, a: SpecAction):
         if not a.id or a.id not in self.known:
@@ -520,15 +543,42 @@ class SpecCompiler:
         self.emit(f"_fit({new}, {max_width:.2f}, {max_height:.2f})")
         self.emit(f"{new}.move_to({_var(a.id)})")
         self.emit(f"_keep_in_frame({new})")
-        self.emit(f"self.play(Transform({_var(a.id)}, {new}), run_time=1.2)", 1.2)
+        self.emit(f"self.play(Transform({_var(a.id)}, {new}), run_time=2.0)", 2.0)
 
     def op_move(self, a: SpecAction):
         if not a.id or a.id not in self.known:
             return
         pos_line, x, y = self._position(a)
-        self.emit(f"self.play({_var(a.id)}.animate.{pos_line}, run_time=1.2)", 1.2)
+        rt = min(max(a.seconds or 2.0, 0.2), 8.0)
+        self.emit(f"self.play({_var(a.id)}.animate.{pos_line}, run_time={rt:.2f})", rt)
         self.emit(f"_keep_in_frame({_var(a.id)})")
         self.boxes[a.id] = (x, y)
+
+    def op_rotate(self, a: SpecAction):
+        """Spin an object: `rotate {id, turns, seconds?}` — continuous motion,
+        the basic ingredient of 3B1B-style phasor/diagram movement."""
+        if not a.id or a.id not in self.known:
+            return
+        turns = min(max(a.turns or 1.0, -10.0), 10.0)
+        rt = min(max(a.seconds or 2.0, 0.3), 12.0)
+        self.emit(
+            f"self.play(Rotate({_var(a.id)}, angle=TAU * {turns:.2f}), run_time={rt:.2f}, "
+            f"rate_func=linear)",
+            rt,
+        )
+
+    def op_pulse(self, a: SpecAction):
+        """Attention pulse: quick scale up/down of a mobject (or 'all')."""
+        if a.target == "all":
+            targets = sorted(self.known)
+        else:
+            targets = [t for t in [a.target] if t and t in self.known]
+        if not targets:
+            return
+        for t in targets:
+            self.emit(f"self.play({_var(t)}.animate.scale(1.15), run_time=0.5)", 0.5)
+        for t in targets:
+            self.emit(f"self.play({_var(t)}.animate.scale(1 / 1.15), run_time=0.5)", 0.5)
 
     def op_remove(self, a: SpecAction):
         if a.target == "all":
@@ -539,13 +589,25 @@ class SpecCompiler:
                 self.boxes.clear()
                 self.regions.clear()
         elif a.target and a.target in self.known:
-            self.emit(f"self.play(FadeOut({_var(a.target)}), run_time=0.8)", 0.8)
+            self.emit(f"self.play(FadeOut({_var(a.target)}), run_time=1.5)", 1.5)
             self.known.discard(a.target)
             self.boxes.pop(a.target, None)
             self.regions.pop(a.target, None)
 
+    def op_clear(self, a: SpecAction):
+        """Explicit canvas clear — like remove all but with a brief pause
+        and visual reset. Use this between distinct diagrams."""
+        if self.known:
+            exprs = ", ".join(_var(t) for t in sorted(self.known))
+            self.emit(f"self.play(FadeOut(VGroup({exprs})), run_time=1.0)", 1.0)
+        self.emit("self.wait(0.3)", 0.3)
+        self.known.clear()
+        self.boxes.clear()
+        self.regions.clear()
+        self.slots_used.clear()
+
     def op_wait(self, a: SpecAction):
-        seconds = min(max(a.seconds or 1.0, 0.0), 20.0)
+        seconds = min(max(a.seconds or 1.5, 0.0), 20.0)
         self.emit(f"self.wait({seconds:.1f})", seconds)
 
     # ---------------------------------------------------------------- top level
@@ -558,7 +620,8 @@ class SpecCompiler:
             "add_bars": self.op_add_bars,
             "label": self.op_label, "connect": self.op_connect,
             "animate": self.op_animate, "transform": self.op_transform,
-            "move": self.op_move, "remove": self.op_remove, "wait": self.op_wait,
+            "move": self.op_move, "rotate": self.op_rotate, "pulse": self.op_pulse,
+            "remove": self.op_remove, "clear": self.op_clear, "wait": self.op_wait,
         }
         title_action = next(
             (
@@ -604,14 +667,18 @@ class SpecCompiler:
             "from manim import *\n"
             "from math import sin, cos, tan, exp, log, sqrt, pi\n"
             "e = exp(1)\n\n\n"
-            "def _fit(m, max_width, max_height):\n"
+            "def _fit(m, max_width, max_height, fill=False):\n"
             "    if m.width > max_width:\n"
             "        m.scale_to_fit_width(max_width)\n"
             "    if m.height > max_height:\n"
             "        m.scale_to_fit_height(max_height)\n"
+            "    if fill:\n"
+            "        s = min(max_width / m.width, max_height / m.height)\n"
+            "        if s > 1.0:\n"
+            "            m.scale(s)\n"
             "    return m\n\n\n"
             "def _keep_in_frame(m):\n"
-            "    left, right, bottom, top = -6.75, 6.75, -3.5, 2.1\n"
+            "    left, right, bottom, top = -6.75, 6.75, -2.5, 2.1\n"
             "    dx = left - m.get_left()[0] if m.get_left()[0] < left else 0\n"
             "    if m.get_right()[0] + dx > right:\n"
             "        dx += right - (m.get_right()[0] + dx)\n"

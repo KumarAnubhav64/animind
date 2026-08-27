@@ -156,7 +156,7 @@ def test_compiler_fits_axes_labels_and_long_title():
     code = compile_spec(spec)
 
     assert "x_length=4.75, y_length=3.45" in code
-    assert "_fit(title, 13.0, 0.72)" in code
+    assert "_fit(title, 11.0, 0.72)" in code
     assert "m_wave.next_to(m_graph, DOWN" in code
     assert "_keep_in_frame(m_wave)" in code
 

@@ -7,13 +7,48 @@ HOUSE STYLE (non-negotiable):
 TEAL, GREEN, YELLOW, GOLD, RED, MAROON, PURPLE, WHITE, GREY_B. Never use BROWN (undefined).
 - Font sizes: titles 40-48, body text 28-36. Text must never touch frame edges: keep every \
 mobject within [-6.5, 6.5] x [-3.5, 3.5].
+- SAFE FRAME BANDS: the top band (y > 2.2) is owned by the title — never place content \
+there. The bottom band (y < -2.5) is reserved for burned-in narration subtitles — NEVER \
+place labels, text, or key content below y = -2.5, or it will be hidden behind the caption \
+bar. Keep all content in the middle band: y between -2.5 and 2.2.
 - Use `.next_to()`, `.align_to()`, `.to_edge()` for positioning; never place two mobjects at \
 overlapping positions at the same time. Keep everything at least 0.8 units below the title \
 band (the title owns the top edge). Fade out old content before introducing new full-screen \
 content.
+- LABEL CLEARANCE: two text labels must never touch or overlap. When labelling several \
+objects, place labels on OPPOSITE sides (e.g. one above, one below; or one left, one right) \
+or far apart so their bounding boxes never collide. Increase `.next_to(..., buff=)` until \
+the labels are clearly separated. A label that would land in the bottom subtitle band must \
+be moved up (place it above its object instead of below). A label placed ABOVE an object \
+that is already near the vertical center will collide with the title — if the object's top \
+is above y = 1.2, place its label BELOW it or beside it instead, or shift the whole diagram \
+down before adding a top label. Never build a tall "brace + label" stack above a high \
+object: check the final label position is below y = 2.2.
+- SCALING: the frame is 14 wide x 8 tall. A circle radius 0.9 or a short arrow is nearly \
+invisible — the main subject of a beat must be large (Circle radius 2-3, or a full region), \
+and companion elements at least radius 1.2. When the narration says "unit circle" or "arrow \
+length one", scale it so it visually dominates (e.g. `Circle(radius=2.5)`), never draw it at \
+true unit scale. Keep 2-4 balanced regions of content, not one small object in the center. \
+Distribute visual weight across the frame: if the main shape is on the left, \
+put labels/equations on the right. Never pile everything into the upper-left \
+while leaving the bottom-right empty.
 - One idea on screen at a time. Build up gradually with Write/FadeIn/Create; prefer Transform \
 over remove-and-replace when related.
 - Use MathTex (LaTeX) for formulas, double-escape backslashes in Python strings.
+- MOTION DESIGN (3Blue1Brown videos MOVE — a frozen slide is a failure): make things spin, \
+travel, morph, and trace. The default is `self.play(mobj.animate.shift/scale/move_to, ...)` plus \
+`ValueTracker` + `always_redraw` for continuous motion. Preferred motion verbs: a vector/radius \
+that rotates around a point; a dot that slides along a curve or orbit; a dashed projection line \
+that follows a moving point; a curve that grows as the dot moves; a smooth Transform between two \
+representations. Do not leave a static diagram on screen for more than a few seconds — if the \
+narration says "rotates/spins/sweeps/approaches", show exactly that motion. See the MOTION \
+FEW-SHOTS below and reuse those structures.
+- ANIMATION PACING (critical for educational content): use `run_time=2` for simple \
+appearances (Write, FadeIn, Create); `run_time=3` for complex motions (Transform, morph, \
+shift+rotate); `run_time=4` for continuous motion (ValueTracker sweeps, tracing curves). \
+Never use the default `run_time=1` — it is too fast for learners. End each beat with \
+`self.wait(1)` or `self.wait(2)` so viewers absorb the idea before the next one starts. \
+Total animation time should roughly match the narration audio duration.
 """
 
 MANIM_CHEATSHEET = """\
@@ -128,6 +163,120 @@ class VideoScene(Scene):
 ```
 """
 
+# Compact adaptations of official MIT-licensed Manim CE gallery pieces
+# (SineCurveUnitCircle and a rotating-vector-sum) that teach continuous motion.
+# Use them whenever the narration involves rotation, sweeping, or tracing.
+MOTION_FEW_SHOTS = r"""MOTION FEW-SHOTS (continuous, 3B1B-style motion)
+
+MOTION A - a point orbiting a circle traces a sine curve (the unit-circle to
+sine construction). One ValueTracker drives the angle; always_redraw rebuilds
+the rotating radius, the projection line, the dots and the growing trace:
+
+```python
+from manim import *
+
+class VideoScene(Scene):
+    def construct(self):
+        self.camera.background_color = "#1c1c1c"
+        title = Text("Sine from a Circle", font_size=44).to_edge(UP, buff=0.4)
+        self.play(Write(title))
+
+        R = 2.0
+        center = np.array([-3.6, 0.2, 0])
+        circle = Circle(radius=R, color=BLUE).move_to(center)
+
+        axes = Axes(
+            x_range=[0, TAU, PI / 2], y_range=[-2.4, 2.4, 1],
+            x_length=5.6, y_length=3.4,
+        ).shift(RIGHT * 3.2 + DOWN * 0.2)
+
+        t = ValueTracker(0.0)
+
+        def get_dot():
+            ang = t.get_value()
+            return Dot(center + np.array([np.cos(ang), np.sin(ang), 0]) * R, color=RED, radius=0.1)
+
+        def get_radius():
+            ang = t.get_value()
+            return Line(center, center + np.array([np.cos(ang), np.sin(ang), 0]) * R, color=RED)
+
+        def get_projection():
+            ang = t.get_value()
+            c = center + np.array([np.cos(ang), np.sin(ang), 0]) * R
+            return DashedLine(c, axes.c2p(ang, 0), color=GREEN)
+
+        def get_sine_dot():
+            ang = t.get_value()
+            return Dot(axes.c2p(ang, R * np.sin(ang)), color=GOLD, radius=0.1)
+
+        def get_trace():
+            angles = np.linspace(0, t.get_value(), 80)
+            pts = [axes.c2p(a, R * np.sin(a)) for a in angles]
+            return VMobject(color=GOLD, stroke_width=5).set_points_as_corners(pts)
+
+        moving_dot = always_redraw(get_dot)
+        moving_radius = always_redraw(get_radius)
+        moving_projection = always_redraw(get_projection)
+        moving_sine_dot = always_redraw(get_sine_dot)
+        moving_trace = always_redraw(get_trace)
+
+        self.play(Create(circle))
+        self.play(Create(axes))
+        self.add(moving_dot, moving_radius, moving_projection, moving_sine_dot, moving_trace)
+        self.play(t.animate.set_value(TAU), run_time=8, rate_func=linear)
+        self.wait(1)
+```
+Lesson: drive EVERYTHING from one ValueTracker; nothing is hand-positioned, so
+rotation and tracing stay perfectly in sync.
+
+MOTION B - several rotating arrows joined head-to-tail; the sum tip is the
+result (a rotating-vector-sum / Fourier intuition). Same single-tracker pattern:
+
+```python
+from manim import *
+
+class VideoScene(Scene):
+    def construct(self):
+        self.camera.background_color = "#1c1c1c"
+        title = Text("Adding Rotating Arrows", font_size=44).to_edge(UP, buff=0.4)
+        self.play(Write(title))
+
+        freqs = [1, 2, 3]
+        lengths = [2.0, 1.0, 0.5]
+        colors = [RED, BLUE, GREEN]
+        origin = np.array([-4.2, 0, 0])
+        t = ValueTracker(0.0)
+
+        def sum_tip(angle):
+            tip = origin.copy()
+            for f, length in zip(freqs, lengths):
+                tip = tip + np.array([np.cos(f * angle), np.sin(f * angle), 0]) * length
+            return tip
+
+        def get_vectors():
+            angle = t.get_value()
+            vectors = VGroup()
+            tip = origin
+            for f, length, color in zip(freqs, lengths, colors):
+                end = tip + np.array([np.cos(f * angle), np.sin(f * angle), 0]) * length
+                vectors.add(Arrow(tip, end, color=color, buff=0, stroke_width=6))
+                tip = end
+            return vectors
+
+        def get_tip():
+            return Dot(sum_tip(t.get_value()), color=GOLD, radius=0.12)
+
+        vectors = always_redraw(get_vectors)
+        tip = always_redraw(get_tip)
+        self.add(vectors, tip)
+        self.play(t.animate.set_value(TAU), run_time=8, rate_func=linear)
+        self.wait(1)
+```
+Lesson: chains of related moving parts belong in a single always_redraw that
+returns a VGroup; the tracked value stays a plain number so any number of
+arrows can share it.
+"""
+
 # These are intentionally compact adaptations of official MIT-licensed Manim CE
 # examples. They teach scene structure without spending the free-tier budget on
 # large copied source files.
@@ -186,6 +335,26 @@ self.play(Write(formula), Circumscribe(formula))
 Lesson: move the same filled pieces from a source circle into a clearly separated
 alternating row/parallelogram. Never overlay triangles on the original circle or
 replace the result with an unrelated square.
+
+PATTERN E - slow educational pacing:
+```python
+title = Text("Gradient Descent", font_size=44, color=WHITE).to_edge(UP)
+curve = axes.plot(lambda x: (x - 2) ** 2, color=BLUE)
+dot = Dot(axes.c2p(4, 4), color=RED)
+arrow = Arrow(dot.get_center(), axes.c2p(2.5, 2.25), color=GREEN)
+label = MathTex(r"\\nabla f", font_size=36, color=GREEN).next_to(arrow, RIGHT)
+
+self.play(Write(title), run_time=2)                          # slow title
+self.play(Create(axes), Create(curve), run_time=3)           # slow curve build
+self.wait(1)                                                 # let viewer absorb
+self.play(FadeIn(dot), run_time=2)                           # slow dot appear
+self.wait(1)
+self.play(Create(arrow), Write(label), run_time=3)           # slow gradient arrow
+self.wait(2)                                                 # hold before next idea
+```
+Lesson: every `self.play` has an explicit `run_time` ≥ 2. Every beat ends with
+`self.wait(1)` or `self.wait(2)`. Nothing appears in under 2 seconds. The viewer
+always has time to read labels and understand the visual before the next change.
 """
 
 
@@ -225,6 +394,8 @@ small lonely object in the center.
 
 {FEW_SHOT_EXAMPLES}
 
+{MOTION_FEW_SHOTS}
+
 {QUALITY_FEW_SHOTS}
 """
 
@@ -235,11 +406,19 @@ def coder_user_prompt(
     visual_description: str,
     audio_duration_s: float | None,
     context: str = "",
+    muted: bool = False,
 ) -> str:
     duration_line = (
         f"Narration audio duration: {audio_duration_s:.1f} seconds."
         if audio_duration_s
         else "Narration audio duration unknown; target ~25 seconds."
+    )
+    muted_note = (
+        "\nThis scene is MUTED (no audio): narration subtitles are burned into the "
+        "bottom of the frame, so the bottom band (y < -2.5) is covered by the caption "
+        "bar. Keep ALL labels and content above y = -2.5.\n"
+        if muted
+        else ""
     )
     continuity = (
         f"\nEarlier scenes in this video (preserve their visual language):\n{context}\n"
@@ -253,6 +432,7 @@ def coder_user_prompt(
         f"Voiceover narration (this will be spoken over your animation):\n{narration}\n\n"
         f"Visual description:\n{visual_description}\n\n"
         f"{duration_line}\n\n"
+        f"{muted_note}"
         f"{continuity}"
         "Generate the complete Manim Python file now."
     )

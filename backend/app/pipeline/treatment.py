@@ -68,6 +68,8 @@ def _action_summary(action: dict[str, Any]) -> str:
         return f"pulse {action.get('target', 'all')}"
     if op == "remove":
         return f"remove {action.get('target', 'all')}"
+    if op == "clear":
+        return "clear canvas"
     if op == "wait":
         return f"wait {action.get('seconds', 1):.1f}s"
     if op == "connect":
