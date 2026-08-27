@@ -6,6 +6,7 @@ collisions, no missing imports, consistent timing.
 """
 
 import json
+import math
 import textwrap
 from pathlib import Path
 
@@ -116,6 +117,8 @@ class SpecCompiler:
         # Approximate centers and regions of placed mobjects for label routing.
         self.boxes: dict[str, tuple[float, float]] = {}
         self.regions: dict[str, str] = {}
+        # Bounding-box half-extents for overlap detection: id -> (half_w, half_h)
+        self.bbox_extents: dict[str, tuple[float, float]] = {}
         self.visual_count = 0
         self.use_3d = False  # auto-set when 3D shapes are used
 
@@ -124,6 +127,73 @@ class SpecCompiler:
     def emit(self, line: str, run_time: float = 0.0):
         self.lines.append("        " + line)
         self.duration += run_time
+
+    def _bbox_half_extents(self, action: SpecAction) -> tuple[float, float]:
+        """Estimate half-width and half-height of an action's bounding box."""
+        op = action.op
+        scale = action.scale or 1.0
+        if op == "add_shape":
+            shape = (action.shape or "circle").lower()
+            if shape in {"dot"}:
+                return 0.2 * scale, 0.2 * scale
+            if shape in {"ring"}:
+                return 0.95 * scale, 0.95 * scale
+            if shape in {"sphere", "cube", "cylinder", "cone", "torus"}:
+                return 0.95 * scale, 0.95 * scale
+            return 1.0 * scale, 1.0 * scale  # circle, square, triangle, diamond
+        if op == "add_asset":
+            return 0.6 * scale, 0.6 * scale
+        if op in {"add_axes", "add_bars"}:
+            return 1.8, 1.4
+        if op == "add_char_table":
+            return 5.0, 3.0
+        # text / equation / label: estimate from content length
+        content = action.text or action.tex or ""
+        font_size = 44 if op == "add_equation" else 30
+        # rough char width: font_size * 0.006 at scale 1
+        char_w = font_size * 0.006
+        half_w = min(len(content) * char_w * 0.5, 4.0) + 0.3
+        half_h = 0.35 if op == "add_equation" else 0.25
+        return half_w, half_h
+
+    def _overlaps_any(
+        self, cx: float, cy: float, hw: float, hh: float, skip_id: str = ""
+    ) -> bool:
+        """Check if a proposed box overlaps any already-placed bounding box."""
+        pad = 0.25  # minimum clearance between objects
+        for oid, (ox, oy) in self.boxes.items():
+            if oid == skip_id:
+                continue
+            ow, oh = self.bbox_extents.get(oid, (0.5, 0.5))
+            # AABB overlap test
+            if (
+                abs(cx - ox) < (hw + ow + pad)
+                and abs(cy - oy) < (hh + oh + pad)
+            ):
+                return True
+        return False
+
+    def _find_free_position(
+        self, x: float, y: float, hw: float, hh: float, region: str
+    ) -> tuple[float, float]:
+        """Search for the nearest non-overlapping position within the region."""
+        if not self._overlaps_any(x, y, hw, hh):
+            return x, y
+        cx, cy, r_hw, r_hh = REGIONS.get(region.lower(), REGIONS["center"])
+        # Search in an expanding spiral from the requested position
+        for radius in (0.8, 1.5, 2.2, 3.0):
+            for angle_deg in range(0, 360, 30):
+                angle = math.radians(angle_deg)
+                nx = x + radius * math.cos(angle)
+                ny = y + radius * math.sin(angle)
+                # Clamp within region bounds
+                nx = max(cx - r_hw, min(nx, cx + r_hw))
+                ny = max(cy - r_hh, min(ny, cy + r_hh))
+                nx, ny = self._clamp(nx, ny, SpecAction(op="add_text"))
+                if not self._overlaps_any(nx, ny, hw, hh):
+                    return nx, ny
+        # Fallback: use the slot system for this region
+        return self._slot_position(region)
 
     def _slot_position(self, region: str) -> tuple[float, float]:
         """Next free position inside a region box (collision-free by design)."""
@@ -134,8 +204,12 @@ class SpecCompiler:
         return cx + fx * hw * 2 / 3, cy + fy * hh * 2 / 3
 
     def _position(self, action: SpecAction) -> tuple[str, float, float]:
+        hw, hh = self._bbox_half_extents(action)
         if action.at and len(action.at) >= 2:
             x, y = self._clamp(action.at[0], action.at[1], action)
+            # Check overlap with existing objects and find free position
+            region = action.region or "center"
+            x, y = self._find_free_position(x, y, hw, hh, region)
             return f"move_to([{x:.2f}, {y:.2f}, 0])", x, y
         x, y = self._slot_position(action.region or "center")
         x, y = self._clamp(x, y, action)
@@ -146,6 +220,7 @@ class SpecCompiler:
         return max(1.2, 2 * hw - 0.45), max(0.7, 2 * hh - 0.35)
 
     def _fit_and_place(self, var: str, action: SpecAction) -> tuple[float, float]:
+        """Fit object to region limits and place it, storing bbox for overlap detection."""
         # When explicit coordinates are given, use full-frame limits (objects
         # are placed intentionally — don't shrink them to region bounds).
         if action.at and len(action.at) >= 2:
@@ -156,6 +231,10 @@ class SpecCompiler:
         pos_line, x, y = self._position(action)
         self.emit(f"{var}.{pos_line}")
         self.emit(f"_keep_in_frame({var})")
+        # Store bounding box for overlap detection on subsequent placements
+        if action.id:
+            hw, hh = self._bbox_half_extents(action)
+            self.bbox_extents[action.id] = (hw, hh)
         return x, y
 
     def _replace_existing(self, mobject_id: str):
@@ -165,6 +244,7 @@ class SpecCompiler:
         self.known.discard(mobject_id)
         self.boxes.pop(mobject_id, None)
         self.regions.pop(mobject_id, None)
+        self.bbox_extents.pop(mobject_id, None)
 
     # Frame is 14.22 x 8 units; title owns everything above y=2.2.
     def _clamp(self, x: float, y: float, action: SpecAction) -> tuple[float, float]:

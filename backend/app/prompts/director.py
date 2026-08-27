@@ -29,6 +29,35 @@ appears (e.g. "the pathogen is always a red circle, antibodies are always gold")
 Later scenes must reference what earlier scenes established, never redefine it.
 - Stay within the writer's target duration: scenes of roughly equal length.
 - Be mathematically/technically accurate.
+
+Rules — VISUAL TIMELINE (critical for multi-phase scenes):
+- Plan visual_description as a PHASED SEQUENCE, not a single snapshot. Write \
+"Phase 1: ... Phase 2: ..." etc. Each phase adds or changes ONE thing.
+- When a scene has multiple phases (e.g. "show A, then show B"), say explicitly \
+what to REMOVE or MOVE before introducing the next element. Example: \
+"Phase 1: waveform on left. Phase 2: fade out waveform, frequency graph appears on right."
+- Never describe more than 4-5 objects on screen simultaneously — if the scene \
+needs more, split into phases with remove/move between them.
+- Each phase should have its own spatial composition ("left", "right", "center").
+- If a later scene reuses an element from a previous scene, say so explicitly \
+("carry over the red circle from Scene 1") rather than redefining it.
+
+Rules — SPATIAL PRECISION (every beat must be unambiguous):
+- For EACH phase/beat, name EVERY object's position using these terms: \
+"left" (x ≈ -3.4), "right" (x ≈ 3.4), "center" (x ≈ 0), \
+"top" (y ≈ 1.4), "bottom" (y ≈ -2.5), \
+"top-left" (x ≈ -3.4, y ≈ 1.3), "top-right" (x ≈ 3.4, y ≈ 1.3), \
+"bottom-left" (x ≈ -3.4, y ≈ -2.4), "bottom-right" (x ≈ 3.4, y ≈ -2.4).
+- NEVER write "appears on screen" or "is shown" without a position. \
+ALWAYS write "appears at left", "appears at center", "appears at right".
+- Example of GOOD visual_description: \
+"Phase 1: Title 'Fourier' at center. A white arrow at center rotates. \
+A dashed line drops from arrow tip to x-axis at (3,0). \
+Phase 2: Arrow and line fade out. A blue sine curve appears at center. \
+A yellow circle appears at left." \
+- Example of BAD visual_description: \
+"A waveform appears and then a graph shows the frequency domain." \
+(No positions, no phases, no cleanup — the coder will pile everything in the center.)
 """
 
 
