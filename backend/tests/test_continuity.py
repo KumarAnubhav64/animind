@@ -101,9 +101,12 @@ def test_continuity_context_with_spec():
             {"op": "add_axes", "id": "axes", "x_range": [-3, 3, 1], "y_range": [-2, 2, 1], "at": [3.0, 0.0]},
         ])
         visual_description = None
+        narration = "We peel the circle into concentric rings."
 
     ctx = _continuity_context(FakeScene())
     assert "Scene 1 (The Ring)" in ctx
     assert "ring" in ctx
     assert "orange" in ctx
     assert "axes" in ctx
+    assert "Concept:" in ctx
+    assert "peel the circle" in ctx

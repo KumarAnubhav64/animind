@@ -137,12 +137,28 @@ def _extract_visual_state(spec_json: str | None) -> str:
 def _continuity_context(scene: Scene) -> str:
     """Compact, truthful summary of the candidate that was actually delivered."""
     visual_state = _extract_visual_state(scene.spec_json)
+    # Extract a brief conceptual summary from narration (first 1-2 sentences)
+    narration = (scene.narration or "").strip()
+    concept = ""
+    if narration:
+        # Take first two sentences as the conceptual summary
+        sentences = []
+        for sent in narration.replace("? ", ". ").replace("! ", ". ").split(". "):
+            sent = sent.strip().rstrip(".")
+            if sent:
+                sentences.append(sent)
+            if len(sentences) >= 2:
+                break
+        concept = ". ".join(sentences) + "." if sentences else narration[:120]
+
+    parts = [f"Scene {scene.idx + 1} ({scene.title}):"]
+    if concept:
+        parts.append(f"Concept: {concept}")
     if visual_state:
-        return (
-            f"Scene {scene.idx + 1} ({scene.title}):\n"
-            f"Visual state at end:\n{visual_state}"
-        )
-    return f"Scene {scene.idx + 1} ({scene.title}): {scene.visual_description or 'no visual description'}"
+        parts.append(f"Visual state at end:\n{visual_state}")
+    else:
+        parts.append(f"Visual description: {scene.visual_description or 'none'}")
+    return "\n".join(parts)
 
 
 def _prior_scene_context(project_id: str, before_idx: int) -> str:
@@ -151,7 +167,12 @@ def _prior_scene_context(project_id: str, before_idx: int) -> str:
         for scene in scene_repo.list_for_project(project_id)
         if scene.idx < before_idx and scene.status == "ready"
     ]
-    return "\n\n".join(_continuity_context(scene) for scene in prior)
+    parts = [_continuity_context(scene) for scene in prior]
+    # Cap total context to avoid exceeding LLM context window (~3K chars = ~750 tokens)
+    joined = "\n\n".join(parts)
+    if len(joined) > 3000:
+        joined = joined[:2800] + "\n\n[context truncated for length]"
+    return joined
 
 
 def _reset_scene(scene: Scene):

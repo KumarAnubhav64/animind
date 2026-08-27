@@ -225,7 +225,7 @@ async def mathcheck(state: SceneState) -> dict[str, Any]:
     narration = state.get("narration") or ""
     issues = validate_math(spec, narration)
     reviewed = False
-    if has_math_content(spec, narration) and settings.math_expert_enabled:
+    if settings.math_expert_enabled:
         for _ in range(max(1, settings.math_expert_max_attempts)):
             fixes = await math_review(spec, narration, issues)
             if not fixes:
