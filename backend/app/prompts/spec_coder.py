@@ -73,6 +73,21 @@ Rules:
 - End beats with wait to let the viewer absorb; total should roughly fill the audio duration.
 - ids: short lowercase words (eq1, curve, virus, arrow1). Reuse ids with transform/animate/move.
 
+Rules — CROSS-SCENE CONTINUITY (critical for multi-scene videos):
+The "PREVIOUS SCENES" section lists what objects exist at the end of each prior scene. \
+You MUST follow these rules:
+- If a previous scene ended with visible objects, this scene MUST start by re-establishing \
+  the SAME objects (same ids, same colors, same shapes) before adding new ones. Use add_shape \
+  or add_axes with the same color to reintroduce them.
+- Do NOT change a concept's color between scenes. If the circle was blue in Scene 1, \
+  it must stay blue in Scene 2 and Scene 3.
+- If the previous scene ended clean (all removed), start fresh — but use the same color \
+  palette for consistency.
+- When transforming a concept across scenes (e.g., ring → rectangle → equation), show the \
+  connection: animate the old object into the new one, or place them side by side briefly.
+- End each scene clean (remove all) ONLY if the next scene starts completely fresh. \
+  If objects carry over, keep them visible.
+
 HIGH-QUALITY VISUAL GRAMMAR (adapted from MIT-licensed Manim CE gallery examples):
 - Semantic transformation: isolate the meaningful parts of an equation, then transform one step at a time;
   never replace a long formula with an unrelated formula without a visible bridge.
@@ -105,16 +120,25 @@ def spec_coder_user_prompt(
         if audio_duration_s
         else "unknown (~25 seconds)"
     )
-    continuity = (
-        f"\nSTORY SO FAR — scenes already produced for this video:\n{context}\n"
-        "Continuity rules: reuse the SAME color for a concept that earlier scenes used; "
-        "if a key object from the previous scene matters here, re-introduce it briefly "
-        "(same shape+color) instead of inventing a new one; do not repeat visuals the "
-        "earlier scenes already showed; end this scene clean (remove all) so the next "
-        "scene starts fresh.\n"
-        if context
-        else ""
-    )
+    continuity = ""
+    if context:
+        continuity = (
+            f"\n{'='*60}\n"
+            f"PREVIOUS SCENES — visual state inventory:\n"
+            f"{context}\n"
+            f"{'='*60}\n"
+            "CROSS-SCENE CONTINUITY RULES (mandatory):\n"
+            "1. Re-introduce ANY object that was visible at the end of a previous scene "
+            "using the SAME id, color, and shape.\n"
+            "2. NEVER change a concept's color between scenes (e.g., if circle was blue "
+            "in Scene 1, it stays blue in Scene 2).\n"
+            "3. If a previous scene ended clean (all removed), start fresh but keep the "
+            "same color palette for visual consistency.\n"
+            "4. When a concept transforms across scenes (ring → rectangle → equation), "
+            "show the connection with a transform or side-by-side placement.\n"
+            "5. If objects carry over, do NOT end this scene with 'remove all' — keep "
+            "them visible for the next scene.\n"
+        )
     spatial_hints = ""
     desc_lower = (visual_description or "").lower()
     spatial_keywords = {

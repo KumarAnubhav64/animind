@@ -66,20 +66,83 @@ def reconcile_ready_projects():
         )
 
 
+def _extract_visual_state(spec_json: str | None) -> str:
+    """Extract a structured summary of visible objects from a scene's spec.
+
+    Instead of dumping raw JSON, produces a human-readable inventory like:
+        - circle (blue) at left (-3.4, 0.0)
+        - equation A = πr² (purple) at bottom
+    This gives the next scene's spec coder a clear picture of what exists.
+    """
+    if not spec_json:
+        return ""
+    try:
+        from app.schemas.spec import SceneSpec
+        spec = SceneSpec.model_validate_json(spec_json)
+    except Exception:  # noqa: BLE001
+        return ""
+
+    alive: dict[str, dict] = {}  # id -> {op, color, position, text/tex}
+    for beat in spec.beats:
+        for a in beat.actions:
+            if a.op == "remove":
+                target = (a.target or "").lower()
+                if target == "all":
+                    alive.clear()
+                elif target in alive:
+                    del alive[target]
+            elif a.op.startswith("add_") and a.id:
+                pos = ""
+                if a.at and len(a.at) >= 2:
+                    pos = f"at ({a.at[0]:.1f}, {a.at[1]:.1f})"
+                elif a.region:
+                    pos = f"in {a.region}"
+                desc = {
+                    "op": a.op.replace("add_", ""),
+                    "color": a.color or "default",
+                    "pos": pos,
+                }
+                if a.text:
+                    desc["text"] = a.text[:40]
+                if a.tex:
+                    desc["tex"] = a.tex[:40]
+                if a.expr:
+                    desc["expr"] = a.expr[:30]
+                alive[a.id] = desc
+            elif a.op == "transform" and a.id and a.id in alive:
+                if a.text:
+                    alive[a.id]["text"] = a.text[:40]
+                if a.tex:
+                    alive[a.id]["tex"] = a.tex[:40]
+
+    if not alive:
+        return "Scene ends with a clean slate (all objects removed)."
+    lines = []
+    for oid, info in alive.items():
+        parts = [f"{info['op']} '{oid}'"]
+        if info["color"] != "default":
+            parts.append(f"({info['color']})")
+        if info["pos"]:
+            parts.append(info["pos"])
+        if "text" in info:
+            parts.append(f'text="{info["text"]}"')
+        if "tex" in info:
+            parts.append(f'tex="{info["tex"]}"')
+        if "expr" in info:
+            parts.append(f'expr={info["expr"]}')
+        lines.append("- " + " ".join(parts))
+    return "\n".join(lines)
+
+
 def _continuity_context(scene: Scene) -> str:
     """Compact, truthful summary of the candidate that was actually delivered."""
-    if scene.spec_json:
-        visual = scene.spec_json[:1500]
-    else:
-        visual = json.dumps(
-            {
-                "title": scene.title,
-                "visual_description": scene.visual_description or "",
-                "code_excerpt": (scene.manim_code or "")[:900],
-            },
-            ensure_ascii=True,
+    visual_state = _extract_visual_state(scene.spec_json)
+    if visual_state:
+        return (
+            f"Scene {scene.idx + 1} ({scene.title}):\n"
+            f"Visual state at end:\n{visual_state}"
         )
-    return f"Scene {scene.idx + 1} ({scene.title}): {visual}"
+    return f"Scene {scene.idx + 1} ({scene.title}): {scene.visual_description or 'no visual description'}"
 
 
 def _prior_scene_context(project_id: str, before_idx: int) -> str:
