@@ -30,13 +30,24 @@ Each beat = one narration thought + its visual actions. Use these ops:
 
 Available ops (use ONLY these):
 - set_title {text} — scene title, shown at top for the whole scene (use once, first)
-- add_text {id, text, region, color?, scale?, at?:[x,y]}
-- add_equation {id, tex (LaTeX, double-escape backslashes), region, color?, scale?, at?:[x,y]}
-- add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?} — use ONLY for abstract/geometric objects
-- add_asset {id, asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book, color?, region or at:[x,y], scale?} — PREFERRED for any real-world object (car, person, apple, etc.)
+- add_text {id, text, region, color?, scale?, at?:[x,y]} — plain text labels only, NEVER for math
+- add_equation {id, tex (LaTeX, double-escape \\), region, color?, scale?, at?:[x,y]} — ALWAYS use for any formula/equation
+- add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?} — abstract/geometric ONLY
+- add_asset {id, asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book, color?, region or at:[x,y], scale?} — PREFERRED for real-world objects
 - add_axes {id, x_range:[min,max,step], y_range:[min,max,step], expr:"x**2", color?, region or at:[x,y]}
+- add_bars {id, values:[...], color?, region or at:[x,y]}
+- label {id, text, target: <existing id>, direction: up|down|left|right}
+- connect {id, from: <existing id>, to: <existing id>, color?}
+- animate {target: <id>|all, anim: write|fade_in|create|grow|indicate|circumscribe|flash|fade_out}
+- transform {id, tex or text} — morph an existing mobject into new content
+- move {id, region or at:[x,y]}
+- remove {target: <id>|all}
+- wait {seconds}
 
-CRITICAL RULE: If the narration mentions a real-world object (car, person, apple, building, earth, star, heart, gear, book, lightning), you MUST use add_asset — never approximate it with a circle or square.
+CRITICAL RULES (violations will produce bad visuals):
+1. REAL-WORLD OBJECTS → add_asset ONLY. Cars, people, apples, buildings, earth, stars, hearts, gears, books, lightning MUST use add_asset. NEVER approximate with circle/square.
+2. MATH FORMULAS → add_equation ONLY. Any equation, formula, or mathematical expression MUST use add_equation with tex field. NEVER use add_text for math.
+3. LaTeX in tex field: double-escape backslashes. Example: "p = m v" for $p = mv$. Subscripts: "p_\\{total\\}". Greek: "\\alpha", "\\beta".
 - add_bars {id, values:[...], color?, region or at:[x,y]}
 - label {id, text, target: <existing id>, direction: up|down|left|right}
 - connect {id, from: <existing id>, to: <existing id>, color?}
@@ -89,8 +100,8 @@ Rules — CROSS-SCENE CONTINUITY (critical for multi-scene videos):
 The "PREVIOUS SCENES" section lists what objects exist at the end of each prior scene. \
 You MUST follow these rules:
 - If a previous scene ended with visible objects, this scene MUST start by re-establishing \
-  the SAME objects (same ids, same colors, same shapes) before adding new ones. Use add_shape \
-  or add_axes with the same color to reintroduce them.
+  the SAME objects (same ids, same colors, same shapes/assets) before adding new ones. \
+  Use add_shape or add_asset with the same color to reintroduce them.
 - Do NOT change a concept's color between scenes. If the circle was blue in Scene 1, \
   it must stay blue in Scene 2 and Scene 3.
 - If the previous scene ended clean (all removed), start fresh — but use the same color \
