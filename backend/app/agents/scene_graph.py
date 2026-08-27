@@ -146,14 +146,10 @@ async def synth_tts(state: SceneState) -> dict[str, Any]:
         duration = await asyncio.to_thread(read_duration)
         return {"audio_path": str(out), "audio_duration": duration, "muted": False, "status": "coding"}
     except Exception as e:  # noqa: BLE001
-        # Rate limits / TTS outage: fall back to a muted scene with subtitles
-        logger.warning("TTS failed for scene %s (%s) — producing muted scene with captions", state["scene_id"], e)
-        return {
-            "audio_path": None,
-            "audio_duration": estimate_duration(state["narration"]),
-            "muted": True,
-            "status": "coding",
-        }
+        # TTS failed — raise so the scene retry logic can attempt again.
+        # Never silently fall back to muted/subtitles when TTS is enabled.
+        logger.error("TTS failed for scene %s (%s)", state["scene_id"], e)
+        raise RuntimeError(f"TTS synthesis failed: {e}") from e
 
 
 async def generate_spec(state: SceneState) -> dict[str, Any]:
@@ -383,12 +379,14 @@ async def merge_node(state: SceneState) -> dict[str, Any]:
     try:
         if state["audio_path"]:
             duration = await merge_audio_video(state["video_path"], state["audio_path"], out)
-        else:
+        elif not get_settings().tts_enabled:
             from app.pipeline.video import merge_with_captions
 
             duration = await merge_with_captions(
                 state["video_path"], state["narration"], out
             )
+        else:
+            raise RuntimeError("No audio path available — TTS should have produced one")
     except Exception as e:  # noqa: BLE001
         # Last resort: ship the raw animation rather than losing the scene
         from moviepy import VideoFileClip
