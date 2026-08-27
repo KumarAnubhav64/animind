@@ -32,9 +32,11 @@ Available ops (use ONLY these):
 - set_title {text} — scene title, shown at top for the whole scene (use once, first)
 - add_text {id, text, region, color?, scale?, at?:[x,y]}
 - add_equation {id, tex (LaTeX, double-escape backslashes), region, color?, scale?, at?:[x,y]}
-- add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?}
-- add_asset {id, asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book, color?, region or at:[x,y], scale?} — use for recognizable real-world objects
+- add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?} — use ONLY for abstract/geometric objects
+- add_asset {id, asset: apple|car|building|earth|star|lightning|heart|checkmark|cross|person|gear|book, color?, region or at:[x,y], scale?} — PREFERRED for any real-world object (car, person, apple, etc.)
 - add_axes {id, x_range:[min,max,step], y_range:[min,max,step], expr:"x**2", color?, region or at:[x,y]}
+
+CRITICAL RULE: If the narration mentions a real-world object (car, person, apple, building, earth, star, heart, gear, book, lightning), you MUST use add_asset — never approximate it with a circle or square.
 - add_bars {id, values:[...], color?, region or at:[x,y]}
 - label {id, text, target: <existing id>, direction: up|down|left|right}
 - connect {id, from: <existing id>, to: <existing id>, color?}
@@ -148,6 +150,9 @@ def spec_coder_user_prompt(
             "show the connection with a transform or side-by-side placement.\n"
             "5. If objects carry over, do NOT end this scene with 'remove all' — keep "
             "them visible for the next scene.\n"
+            "6. For real-world objects (cars, people, apples, buildings, earth, stars, "
+            "hearts, gears, books, lightning), use add_asset with the asset name — "
+            "NEVER approximate with circles or squares.\n"
         )
     spatial_hints = ""
     desc_lower = (visual_description or "").lower()
