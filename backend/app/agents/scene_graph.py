@@ -86,6 +86,7 @@ class SceneState(TypedDict):
     # inputs (immutable during the run)
     project_id: str
     scene_id: str
+    scene_idx: int
     title: str
     narration: str
     visual_description: str
@@ -172,7 +173,23 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
     )
     from app.schemas.spec import SceneSpec
     from app.agents.studio_graph import structured_call
+    from app.pipeline.events import publish as _publish
 
+    scene_id = state["scene_id"]
+    project_id = state["project_id"]
+
+    async def _progress(message: str):
+        await _publish(
+            project_id,
+            {
+                "type": "workflow",
+                "scene_id": scene_id,
+                "scene_idx": state.get("scene_idx", 0),
+                "agent": "SpecCoder",
+                "node": "specgen",
+                "message": message,
+            },
+        )
     msg = spec_coder_user_prompt(
         state["title"],
         state["narration"],
@@ -182,6 +199,9 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
     )
     parsed: SceneSpec | None = None
     try:
+        await _progress(
+            "Reading narration and continuity context to plan the scene's beats, objects, and visual layout."
+        )
         parsed = await structured_call(
             coder_llm(),
             [
@@ -189,10 +209,16 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                 ("human", msg + '\n\nReturn a single JSON object with keys "title" and "beats".'),
             ],
             SceneSpec,
+            project_id=project_id,
+        )
+        await _progress(
+            f"Structured {len(parsed.beats)} beats into a declarative spec ({len(parsed.beats)} action groups); compiling to Manim code."
         )
         code = compile_spec(parsed, state.get("audio_duration"))
+        await _progress("Compiled the declarative spec into deterministic Manim code.")
     except Exception as e:  # noqa: BLE001
-        logger.warning("scene %s: spec generation failed (%s) — using raw codegen", state["scene_id"], e)
+        logger.warning("scene %s: spec generation failed (%s) — using raw codegen", scene_id, e)
+        await _progress("Spec path failed; falling back to raw LLM code generation.")
         result = await generate_code(state)
         return {**result, "fell_back": True, "spec_json": None}
     return {
@@ -526,6 +552,7 @@ SCENE_GRAPH = build_scene_graph()
 async def run_scene(
     project_id: str,
     scene_id: str,
+    scene_idx: int,
     title: str,
     narration: str,
     visual_description: str,
@@ -537,6 +564,7 @@ async def run_scene(
     initial: SceneState = {
         "project_id": project_id,
         "scene_id": scene_id,
+        "scene_idx": scene_idx,
         "title": title,
         "narration": narration,
         "visual_description": visual_description,

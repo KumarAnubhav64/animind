@@ -275,6 +275,7 @@ async def produce_scene(scene: Scene, context: str = "") -> bool:
         result, _events = await run_scene(
             scene.project_id,
             scene.id,
+            scene.idx,
             scene.title,
             scene.narration,
             scene.visual_description or "",
