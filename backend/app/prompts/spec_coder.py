@@ -32,7 +32,7 @@ Available ops (use ONLY these):
 - set_title {text} — scene title, shown at top for the whole scene (use once, first)
 - add_text {id, text, region, color?, scale?, at?:[x,y]}
 - add_equation {id, tex (LaTeX, double-escape backslashes), region, color?, scale?, at?:[x,y]}
-- add_shape {id, shape: circle|square|dot|triangle|diamond|ring, color?, region or at:[x,y], scale?}
+- add_shape {id, shape: circle|square|dot|triangle|diamond|ring|sphere|cube|cylinder|cone|torus, color?, region or at:[x,y], scale?}
 - add_axes {id, x_range:[min,max,step], y_range:[min,max,step], expr:"x**2", color?, region or at:[x,y]}
 - add_bars {id, values:[...], color?, region or at:[x,y]}
 - label {id, text, target: <existing id>, direction: up|down|left|right}
@@ -50,9 +50,18 @@ Rules — SPATIAL LAYOUT (critical for consistency):
   with at least 2.0 horizontal spacing. Never rely on region auto-spread for \
   multi-object layouts.
 - Shared vertical scale: if two objects must correspond (e.g., a circle and its \
-  projection), place them at the same y-level or use matching y_range.
+  projection), place them at the same y-level or using matching y_range.
 - Labels attach to their parent via the label op with direction; never add_text \
   directly above/below another object.
+
+Rules — 3D SHAPES (use for physics, geometry, spatial topics):
+- Use 3D shapes when the concept involves physical objects or 3D space: \
+  sphere, cube, cylinder, cone, torus.
+- 3D shapes automatically render in ThreeDScene with an isometric camera view.
+- Common mappings: ball/planet/sphere → sphere, block/box/building → cube, \
+  pipe/column/rod → cylinder, mountain/arrow/cone → cone, ring/donut → torus.
+- For topics about gravity, orbits, waves, or spacetime — always use 3D shapes.
+- 3D shapes support the same color and at:[x,y] placement as 2D shapes.
 
 Rules — EXPLANATION QUALITY (multimedia learning principles):
 - Segmenting: each beat = exactly ONE idea. If a beat's description contains "and", \

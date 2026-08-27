@@ -42,7 +42,9 @@ _SLOT_GRID = [
 
 DIRECTIONS = {"up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT"}
 
-SHAPES = {"circle", "square", "dot", "triangle", "diamond", "ring"}
+SHAPES_2D = {"circle", "square", "dot", "triangle", "diamond", "ring"}
+SHAPES_3D = {"sphere", "cube", "cylinder", "cone", "torus"}
+SHAPES = SHAPES_2D | SHAPES_3D
 
 DEFAULT_ANIM = {"add_text": "write", "add_equation": "write", "add_shape": "grow",
                 "add_axes": "create", "add_bars": "create", "label": "write",
@@ -112,6 +114,7 @@ class SpecCompiler:
         self.boxes: dict[str, tuple[float, float]] = {}
         self.regions: dict[str, str] = {}
         self.visual_count = 0
+        self.use_3d = False  # auto-set when 3D shapes are used
 
     # ---------------------------------------------------------------- helpers
 
@@ -240,17 +243,31 @@ class SpecCompiler:
         self._replace_existing(a.id)
         shape = (a.shape or "circle").lower()
         color = _color(a.color, "BLUE")
-        constructors = {
-            "circle": f"Circle(radius=0.9 * {a.scale or 1.0:.2f}, color={color})",
-            "square": f"Square(side_length=1.6 * {a.scale or 1.0:.2f}, color={color})",
-            "dot": f"Dot(radius=0.15 * {a.scale or 1.0:.2f}, color={color})",
-            "triangle": f"Triangle(radius=0.9 * {a.scale or 1.0:.2f}, color={color})",
-            "diamond": f"Polygon([0,1,0],[1,0,0],[0,-1,0],[-1,0,0], color={color}).scale({a.scale or 1.0:.2f})",
-            "ring": f"Circle(radius=0.9 * {a.scale or 1.0:.2f}, color={color}).set_stroke(width=6)",
+        scale = a.scale or 1.0
+        # 2D shapes
+        constructors_2d = {
+            "circle": f"Circle(radius=0.9 * {scale:.2f}, color={color})",
+            "square": f"Square(side_length=1.6 * {scale:.2f}, color={color})",
+            "dot": f"Dot(radius=0.15 * {scale:.2f}, color={color})",
+            "triangle": f"Triangle(radius=0.9 * {scale:.2f}, color={color})",
+            "diamond": f"Polygon([0,1,0],[1,0,0],[0,-1,0],[-1,0,0], color={color}).scale({scale:.2f})",
+            "ring": f"Circle(radius=0.9 * {scale:.2f}, color={color}).set_stroke(width=6)",
         }
-        if shape not in constructors:
-            shape = "circle"
-        self.emit(f"{_var(a.id)} = {constructors[shape]}")
+        # 3D shapes
+        constructors_3d = {
+            "sphere": f"Sphere(radius=0.9 * {scale:.2f}, color={color}, resolution=(24, 24))",
+            "cube": f"Cube(side_length=1.4 * {scale:.2f}, color={color})",
+            "cylinder": f"Cylinder(radius=0.7 * {scale:.2f}, height=1.6 * {scale:.2f}, color={color})",
+            "cone": f"Cone(base_radius=0.8 * {scale:.2f}, height=1.6 * {scale:.2f}, color={color})",
+            "torus": f"Torus(major_radius=0.8 * {scale:.2f}, minor_radius=0.25 * {scale:.2f}, color={color})",
+        }
+        if shape in constructors_3d:
+            self.use_3d = True
+            self.emit(f"{_var(a.id)} = {constructors_3d[shape]}")
+        elif shape in constructors_2d:
+            self.emit(f"{_var(a.id)} = {constructors_2d[shape]}")
+        else:
+            self.emit(f"{_var(a.id)} = {constructors_2d['circle']}")
         x, y = self._fit_and_place(_var(a.id), a)
         self.boxes[a.id] = (x, y)
         self.regions[a.id] = (a.region or "center").lower()
@@ -465,6 +482,18 @@ class SpecCompiler:
             self.emit(f"self.wait({remaining:.1f})  # hold final frame for narration", remaining)
 
         body = "\n".join(self.lines) or "        pass"
+
+        # Choose Scene vs ThreeDScene based on whether 3D shapes were used
+        if self.use_3d:
+            scene_class = "ThreeDScene"
+            camera_init = (
+                '        self.camera.background_color = "#1c1c1c"\n'
+                "        self.set_camera_orientation(phi=60 * DEGREES, theta=-45 * DEGREES)\n"
+            )
+        else:
+            scene_class = "Scene"
+            camera_init = '        self.camera.background_color = "#1c1c1c"\n'
+
         return (
             "from manim import *\n"
             "from math import sin, cos, tan, exp, log, sqrt, pi\n"
@@ -494,9 +523,9 @@ class SpecCompiler:
             "    up = cb[1] > ca[1]\n"
             "    return Arrow(a.get_edge_center(UP if up else DOWN), "
             "b.get_edge_center(DOWN if up else UP), buff=0.15, stroke_width=3, color=color)\n\n\n"
-            "class VideoScene(Scene):\n"
+            f"class VideoScene({scene_class}):\n"
             "    def construct(self):\n"
-            '        self.camera.background_color = "#1c1c1c"\n'
+            f"{camera_init}"
             f"{body}\n"
         )
 
