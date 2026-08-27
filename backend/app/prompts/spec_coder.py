@@ -133,6 +133,112 @@ HIGH-QUALITY VISUAL GRAMMAR (adapted from MIT-licensed Manim CE gallery examples
   signaling animation. These patterns come from the official Manim CE examples `ArgMinExample`, `PolygonOnAxes`,
   `SineCurveUnitCircle`, `MovingDiGraph`, and `TransformMatchingTex`; use their visual grammar, not their APIs
   blindly.
+
+FEW-SHOT EXAMPLES (copy these spatial patterns):
+
+EXAMPLE 1 — Unit Circle → Sine Wave (side-by-side, phased):
+Director says: "A point travels around a unit circle on the left; its vertical
+coordinate is plotted as a sine wave on the right."
+
+GOOD SceneSpec:
+{
+  "title": "Unit Circle and Sine Wave",
+  "layout": {
+    "regions": [
+      {"name": "circle_area", "area": "left", "at": [-3.4, 0]},
+      {"name": "wave_area", "area": "right", "at": [3.4, 0]}
+    ]
+  },
+  "beats": [
+    {"actions": [
+      {"op": "set_title", "text": "Unit Circle and Sine Wave"},
+      {"op": "add_axes", "id": "circle_axes", "x_range": [-1.5, 1.5, 0.5], "y_range": [-1.5, 1.5, 0.5], "at": [-3.4, 0], "color": "grey"},
+      {"op": "add_shape", "id": "unit_circle", "shape": "circle", "color": "blue", "at": [-3.4, 0], "scale": 1.0}
+    ]},
+    {"actions": [
+      {"op": "add_axes", "id": "wave_axes", "x_range": [0, 6.5, 1.57], "y_range": [-1.5, 1.5, 0.5], "at": [3.4, 0], "color": "grey"},
+      {"op": "add_label", "id": "pi_label", "text": "2π", "target": "wave_axes", "direction": "down"}
+    ]},
+    {"actions": [
+      {"op": "add_shape", "id": "dot", "shape": "dot", "color": "yellow", "at": [-2.4, 0], "scale": 1.5},
+      {"op": "connect", "id": "radius_line", "from_id": "unit_circle", "to_id": "dot", "color": "blue"}
+    ]},
+    {"actions": [
+      {"op": "add_equation", "id": "sine_curve", "tex": "y = \\sin(\\theta)", "color": "yellow", "at": [3.4, 0]}
+    ]}
+  ]
+}
+
+BAD SceneSpec (everything piled in center — causes overlap):
+{
+  "title": "Unit Circle and Sine Wave",
+  "beats": [
+    {"actions": [
+      {"op": "add_shape", "id": "circle", "shape": "circle", "color": "blue"},
+      {"op": "add_axes", "id": "axes", "x_range": [0, 6, 1], "y_range": [-1, 1, 0.5]},
+      {"op": "add_equation", "id": "eq", "tex": "y = \\sin(\\theta)"},
+      {"op": "add_shape", "id": "dot", "shape": "dot", "color": "yellow"}
+    ]}
+  ]
+}
+
+EXAMPLE 2 — Side-by-side comparison (left vs right):
+Director says: "Subject on left, Object on right, Verb on far right, connected
+by arrows."
+
+GOOD SceneSpec:
+{
+  "title": "SOV Structure",
+  "layout": {
+    "regions": [
+      {"name": "subject_area", "area": "left", "at": [-4.0, 0]},
+      {"name": "object_area", "area": "center", "at": [0, 0]},
+      {"name": "verb_area", "area": "right", "at": [4.0, 0]}
+    ]
+  },
+  "beats": [
+    {"actions": [
+      {"op": "set_title", "text": "Japanese SOV Structure"},
+      {"op": "add_shape", "id": "subject", "shape": "circle", "color": "red", "at": [-4.0, 0], "scale": 0.8},
+      {"op": "add_label", "id": "subj_label", "text": "Subject", "target": "subject", "direction": "down"}
+    ]},
+    {"actions": [
+      {"op": "add_shape", "id": "object", "shape": "triangle", "color": "blue", "at": [0, 0], "scale": 0.8},
+      {"op": "add_label", "id": "obj_label", "text": "Object", "target": "object", "direction": "down"}
+    ]},
+    {"actions": [
+      {"op": "add_shape", "id": "verb", "shape": "square", "color": "gold", "at": [4.0, 0], "scale": 0.8},
+      {"op": "add_label", "id": "verb_label", "text": "Verb", "target": "verb", "direction": "down"}
+    ]},
+    {"actions": [
+      {"op": "connect", "id": "arrow1", "from_id": "subject", "to_id": "object", "color": "white"},
+      {"op": "connect", "id": "arrow2", "from_id": "object", "to_id": "verb", "color": "white"}
+    ]}
+  ]
+}
+
+EXAMPLE 3 — Phased build-up (introduce → transform → highlight):
+Director says: "Start with a simple equation, then transform step by step into
+the final form."
+
+GOOD SceneSpec:
+{
+  "title": "Deriving the Quadratic Formula",
+  "beats": [
+    {"actions": [
+      {"op": "set_title", "text": "Deriving the Quadratic Formula"},
+      {"op": "add_equation", "id": "eq1", "tex": "ax^2 + bx + c = 0", "color": "white", "at": [0, 0]}
+    ]},
+    {"actions": [
+      {"op": "transform", "id": "eq1", "tex": "x^2 + \\frac{b}{a}x + \\frac{c}{a} = 0"},
+      {"op": "animate", "target": "eq1", "anim": "indicate"}
+    ]},
+    {"actions": [
+      {"op": "remove", "target": "eq1"},
+      {"op": "add_equation", "id": "eq2", "tex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}", "color": "yellow", "at": [0, 0]}
+    ]}
+  ]
+}
 """
 
 
