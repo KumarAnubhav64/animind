@@ -58,6 +58,12 @@ def _project_out(project_id: str) -> ProjectOut:
 # ---------------------------------------------------------------- projects
 
 
+@app.get("/api/projects", response_model=list[ProjectOut])
+async def list_projects():
+    projects = project_repo.list()
+    return [_project_out(p.id) for p in projects]
+
+
 @app.post("/api/projects", response_model=ProjectOut)
 async def create_project(req: ProjectCreate):
     if not get_settings().groq_api_key:
