@@ -13,6 +13,7 @@ logged warning, so free-tier caps can never deadlock the pipeline.
 """
 
 import ast
+import asyncio
 import json
 import logging
 import math
@@ -241,7 +242,10 @@ async def math_review(spec: SceneSpec, narration: str, issues: list[str]) -> lis
         ),
     ]
     try:
-        response = await llm_with_retry(math_expert_llm(), messages, attempts=2, wait_s=20.0)
+        response = await asyncio.wait_for(
+            llm_with_retry(math_expert_llm(), messages, attempts=1, wait_s=5.0),
+            timeout=30.0,
+        )
         text = response.content if isinstance(response.content, str) else str(response.content)
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end == -1:
@@ -254,7 +258,7 @@ async def math_review(spec: SceneSpec, narration: str, issues: list[str]) -> lis
             fix for fix in fixes
             if isinstance(fix, dict) and fix.get("id") and fix.get("field")
         ]
-    except Exception as e:  # noqa: BLE001
+    except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
         logger.warning("math review failed (fail-open): %s", e)
         return []
 
