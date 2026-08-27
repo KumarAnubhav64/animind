@@ -16,14 +16,22 @@ if _settings.langsmith_tracing and os.environ.get("LANGSMITH_API_KEY"):
 _LLM_KWARGS = {"max_retries": 6, "timeout": 120}
 
 
-def _groq(model: str, temperature: float) -> ChatGroq:
+def _groq(model: str, temperature: float, api_key: str | None = None) -> ChatGroq:
     s = get_settings()
     return ChatGroq(
         model=model,
-        api_key=s.groq_api_key,
+        api_key=api_key or s.groq_api_key,
         temperature=temperature,
         **_LLM_KWARGS,
     )
+
+
+def _backup_groq(model: str, temperature: float) -> ChatGroq | None:
+    """A Groq client bound to the backup API key, or None if unset."""
+    s = get_settings()
+    if not s.groq_api_key_backup:
+        return None
+    return _groq(model, temperature, api_key=s.groq_api_key_backup)
 
 
 @lru_cache

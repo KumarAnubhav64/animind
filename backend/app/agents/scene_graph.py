@@ -35,9 +35,15 @@ async def llm_with_retry(
     project_id: str | None = None,
 ):
     """Rate-limit-aware LLM call: the SDK backs off on 429s, but on free tiers
-    a parallel scene burst can still exhaust retries — wait and try again."""
+    a parallel scene burst can still exhaust retries — wait and try again.
+    If the primary Groq key keeps failing, retry on the backup key."""
+    from app.agents.llm import _backup_groq
+
     last_err: Exception | None = None
     model = _model_name(llm)
+    temperature = getattr(llm, "temperature", 0.3)
+    backup_llm: Any = None
+    used_backup = False
     for i in range(attempts):
         start = asyncio.get_event_loop().time()
         try:
@@ -55,6 +61,21 @@ async def llm_with_retry(
             # only delays the fallback and consumes another provider call.
             if "tokens per day" in message or "tpd" in message:
                 settings = get_settings()
+                if backup_llm is None:
+                    backup_llm = _backup_groq(model, temperature)
+                if not used_backup and backup_llm is not None:
+                    logger.warning("primary key hit daily token cap; retrying on backup Groq key")
+                    used_backup = True
+                    try:
+                        result = await backup_llm.ainvoke(messages)
+                        _record_call(
+                            model=model, result=result,
+                            latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
+                            project_id=project_id, note="key-backup",
+                        )
+                        return result
+                    except Exception as backup_error:  # noqa: BLE001
+                        last_err = backup_error
                 if model != settings.fallback_model:
                     logger.warning(
                         "primary model hit daily token cap; switching to fallback model %s",
@@ -74,6 +95,21 @@ async def llm_with_retry(
                 logger.warning("rate limited, waiting %ss (attempt %s/%s)", wait_s, i + 1, attempts)
                 await asyncio.sleep(wait_s)
             else:
+                if backup_llm is None:
+                    backup_llm = _backup_groq(model, temperature)
+                if not used_backup and backup_llm is not None:
+                    logger.warning("primary key rate-limited; retrying on backup Groq key")
+                    used_backup = True
+                    try:
+                        result = await backup_llm.ainvoke(messages)
+                        _record_call(
+                            model=model, result=result,
+                            latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
+                            project_id=project_id, note="key-backup",
+                        )
+                        return result
+                    except Exception as backup_error:  # noqa: BLE001
+                        last_err = backup_error
                 raise
     raise last_err  # type: ignore[misc]
 

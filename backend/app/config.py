@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = ""
+    groq_api_key_backup: str = ""  # second Groq key used after primary-key retries are exhausted
 
     planner_model: str = "openai/gpt-oss-120b"  # only model that handles nested json_schema reliably
     coder_model: str = "openai/gpt-oss-120b"  # strongest codegen
