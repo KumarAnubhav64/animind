@@ -63,6 +63,30 @@ A yellow circle appears at left." \
 (No positions, no phases, no cleanup — the coder will pile everything in the center.)
 
 Rules — EXPLANATION QUALITY (how to teach with visuals):
+- THE GOLDEN RULE: every causal claim in the narration must carry its "because". \
+"X leads to Y" is a name-drop; "X leads to Y because Z" is an explanation. Write the \
+mechanism, never just the outcome. Bad: "the area tells us the strength of that \
+frequency." Good: "when the waves match, peaks land on peaks and the product never \
+cancels, so the area stays big — that area is how strong that frequency is." If a \
+sentence states an effect, the NEXT sentence must state the cause. Read each scene's \
+narration back and delete any sentence that doesn't say why.
+- Three moves per scene: (1) concrete observation (something the viewer can see \
+happen), (2) the mechanism that explains it ("this happens because..."), (3) name \
+or formalize that mechanism. If move 2 is missing, the scene is a recital, not an \
+explanation. Check every scene hits all three.
+- Anchor every technical term on first use: a word like "geodesic", "spectrum", \
+"correlation", or "integral" must first appear inside a plain-language definition of \
+what it DOES in this context ("the shortest path on the curved sheet — the geodesic — \
+..."), never as a bare label the viewer is expected to know.
+- Metaphors are scaffolding, not answers: after using a metaphor ("spacetime is a \
+stretchable sheet"), spend one clause connecting it back to the real mechanism it \
+stands for ("the sag is a shorter path through curved geometry; objects follow it \
+the way a ball rolls into a valley"). A scene that only ever says "imagine a sheet" \
+without the mechanism is a failure.
+- Include one WORKED MICRO-EXAMPLE per scene: trace one small concrete instance \
+end-to-end (matching vs mismatched waves; one small mass vs a heavy one; one step \
+of gradient descent) rather than only describing the general rule. The micro-example \
+is the part the viewer remembers.
 - Concrete hook: open each scene with a visual that the viewer can immediately \
 grasp (a shape, a motion, a real-world metaphor) before adding labels or equations.
 - Show THEN name: the visual appears first, then the label or equation follows. \

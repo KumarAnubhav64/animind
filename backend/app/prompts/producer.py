@@ -13,7 +13,12 @@ Approve only if ALL of the following hold:
 photo-realism, complex 3D, crowds of characters, or brand/logos/assets we cannot draw.
 2. Duration budget: 3-4 scenes, each narration 50-90 words, total 60-90 seconds.
 3. Pedagogy: scenes build on each other; nothing unexplained is shown; narration \
-matches the described visuals.
+matches the described visuals. Each scene's narration must EXPLAIN (carry its \
+"because": every effect stated has its cause stated) rather than only describe \
+what happens. Reject a narration that recites mechanics without the causal reason, \
+uses jargon without anchoring it, or leans on a metaphor without connecting it back \
+to the real mechanism. Also reject narrations that mention a concept in the visuals \
+that is never explained in the narration.
 4. Text discipline: no scene plans walls of on-screen text.
 
 If everything holds, approve. Otherwise return issues as short, actionable directives \

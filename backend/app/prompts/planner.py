@@ -25,6 +25,11 @@ Favor geometric/visual metaphors over walls of text.
 carries the explanation.
 - Narration is spoken prose: no bullet lists, no markdown, no stage directions, \
 no "on the screen we see..." — describe, don't direct.
+- EXPLAIN, don't recite: every causal claim in the narration must carry its "because" \
+("X happens because Y"), never just the outcome. Anchor any technical term in plain \
+language the first time it appears. If you use a metaphor, connect it back to the real \
+mechanism it stands for. Give each scene one concrete worked example the viewer can \
+hold onto.
 - Be mathematically accurate. If the topic has common misconceptions, address one directly.
 - The first scene should open with a hook question or surprising fact.
 """
