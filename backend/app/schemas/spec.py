@@ -50,6 +50,7 @@ class SpecAction(BaseModel):
     x_range: list[float] | None = None
     y_range: list[float] | None = None
     expr: str | None = None  # python lambda body in variable x, e.g. "x**2"
+    offset: float | None = None  # vertical shift of a curve in plot data units
     direction: str | None = None  # up|down|left|right
     values: list[float] | None = None
     from_id: str | None = Field(default=None, alias="from")
@@ -73,9 +74,19 @@ class SceneSpec(BaseModel):
         valid)."""
         issues: list[str] = []
         defined: set[str] = set()
+        known_ops = {
+            "set_title", "add_text", "add_equation", "add_shape", "add_asset",
+            "add_axes", "add_bars", "add_curve", "label", "connect", "animate",
+            "transform", "move", "rotate", "pulse", "remove", "clear", "wait",
+        }
         for bi, beat in enumerate(self.beats):
             for ai, action in enumerate(beat.actions):
                 op = action.op
+                if op not in known_ops:
+                    issues.append(
+                        f"beat {bi + 1} action {ai + 1}: unknown op '{op}' — "
+                        f"must be one of {', '.join(sorted(known_ops))}"
+                    )
                 # add_* ops MUST have an id
                 if op.startswith("add_") and action.id:
                     defined.add(action.id)
@@ -107,6 +118,23 @@ class SceneSpec(BaseModel):
                         issues.append(
                             f"beat {bi + 1} action {ai + 1}: connect 'to' = "
                             f"'{tid}' but no object with that id has been defined yet"
+                        )
+                # add_curve plots a function onto an existing axes
+                if op == "add_curve":
+                    if not action.expr:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: add_curve is missing 'expr' "
+                            "(the function to plot in variable x, e.g. \"sin(x)\")"
+                        )
+                    if not action.target:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: add_curve is missing 'target' "
+                            "(the id of the axes to plot on)"
+                        )
+                    elif action.target not in defined:
+                        issues.append(
+                            f"beat {bi + 1} action {ai + 1}: add_curve 'target' = "
+                            f"'{action.target}' but no object with that id has been defined yet"
                         )
                 # animate/rotate/move/transform/remove need a target or id
                 if op in ("animate", "rotate", "move", "transform", "remove"):

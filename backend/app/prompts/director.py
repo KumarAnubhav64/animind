@@ -76,12 +76,25 @@ for the next scene.  The viewer should see exactly what persists.
 """.format(mayer=MAYER_PRINCIPLES)
 
 
-def director_user_prompt(outline_json: str, topic: str, audience_level: str, subject: str | None) -> str:
+def director_user_prompt(
+    outline_json: str,
+    topic: str,
+    audience_level: str,
+    subject: str | None,
+    research_brief: str = "",
+) -> str:
+    research_block = (
+        f"\n\nWeb research brief (use these facts and analogies to make the "
+        f"visuals and narration concrete and accurate):\n{research_brief}"
+        if research_brief
+        else ""
+    )
     return (
         f"Topic: {topic}\n"
         f"Audience level: {audience_level}\n"
         f"Subject: {subject or 'general'}\n\n"
         f"Writer's outline:\n{outline_json}\n\n"
+        f"{research_block}\n\n"
         "Produce the storyboard JSON now."
     )
 

@@ -181,9 +181,19 @@ async def critique_scene(
             passed=True, issues=[],
             skipped_reason="visual QA skipped: primary vision model unavailable and no fallback configured",
         )
+    if not router_ok and not settings.vision_model_fallback_vision_capable:
+        return VisualVerdict(
+            passed=True, issues=[],
+            skipped_reason=(
+                "visual QA skipped: primary vision model unavailable and the configured fallback "
+                f"({settings.vision_model_fallback}) is text-only — text-only models cannot judge "
+                "screenshots, so QA fails open instead of rejecting on hallucinations"
+            ),
+        )
     try:
+        frame_count = settings.vision_max_frames if router_ok else settings.vision_max_frames_fallback
         frames = await extract_frames(
-            video_path, count=settings.vision_max_frames, width=settings.vision_frame_width
+            video_path, count=frame_count, width=settings.vision_frame_width
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("frame extraction failed, skipping critique: %s", e)
@@ -205,7 +215,7 @@ async def critique_scene(
         if verdict is not None:
             return verdict
 
-    if groq_ok:
+    if groq_ok and settings.vision_model_fallback_vision_capable:
         fallback = _vision_llm_fallback()
         if fallback is not None:
             verdict = await _critique_with(fallback, content, settings, is_router=False)
@@ -214,5 +224,8 @@ async def critique_scene(
 
     return VisualVerdict(
         passed=True, issues=[],
-        skipped_reason="visual QA skipped: every vision model failed; passed by default (fail-open)",
+        skipped_reason=(
+            "visual QA skipped: primary vision model failed and no vision-capable "
+            "fallback is reachable (text-only models are never allowed to critique)"
+        ),
     )

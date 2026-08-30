@@ -4,16 +4,15 @@ Writer structures the explanation, Director storyboards it, Producer reviews
 feasibility; rejected storyboards go back to the Director (max 2 revisions).
 """
 
-import asyncio
 import json
 import logging
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.agents.llm import fallback_llm, planner_llm
+from app.agents.llm import planner_llm
+from app.agents.structured import structured_call
 from app.config import get_settings
-from app.pipeline.telemetry import record as _record_call
 from app.prompts.director import (
     DIRECTOR_SYSTEM_PROMPT,
     director_revision_prompt,
@@ -29,80 +28,12 @@ logger = logging.getLogger("animind.studio")
 MAX_REVISIONS = 2
 
 
-async def structured_call(
-    model, messages, schema, attempts: int = 3, project_id: str | None = None
-):
-    """Invoke with_structured_output with retries (json_schema method; Groq's
-    tool-call method fails on nested schemas, and long generations occasionally
-    emit invalid JSON)."""
-    from app.agents.llm import _backup_groq
-
-    structured = model.with_structured_output(schema, method="json_schema")
-    model_name = getattr(model, "model_name", None) or getattr(model, "model", None) or str(model)
-    temperature = getattr(model, "temperature", 0.6)
-    backup_llm = _backup_groq(model_name, temperature)
-    used_backup = False
-    last_err: Exception | None = None
-    for i in range(attempts):
-        start = asyncio.get_event_loop().time()
-        try:
-            result = await structured.ainvoke(messages)
-            _record_call(
-                model=model_name, result=result,
-                latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
-                project_id=project_id,
-            )
-            return result
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-            message = str(e).lower()
-            if "tokens per day" in message or "tpd" in message:
-                if not used_backup and backup_llm is not None:
-                    logger.warning(
-                        "primary key hit daily token cap; retrying on backup Groq key"
-                    )
-                    used_backup = True
-                    try:
-                        fallback = backup_llm.with_structured_output(
-                            schema, method="json_schema"
-                        )
-                        result = await fallback.ainvoke(messages)
-                        _record_call(
-                            model=model_name, result=result,
-                            latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
-                            project_id=project_id, note="key-backup",
-                        )
-                        return result
-                    except Exception as backup_error:  # noqa: BLE001
-                        last_err = backup_error
-                fallback = fallback_llm().with_structured_output(
-                    schema, method="json_schema"
-                )
-                logger.warning(
-                    "primary model hit daily token cap; switching to fallback model %s",
-                    get_settings().fallback_model,
-                )
-                try:
-                    result = await fallback.ainvoke(messages)
-                    _record_call(
-                        model=get_settings().fallback_model, result=result,
-                        latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
-                        project_id=project_id, note="tpd-fallback",
-                    )
-                    return result
-                except Exception as fallback_error:  # noqa: BLE001
-                    last_err = fallback_error
-                    logger.warning("fallback structured call failed: %s", fallback_error)
-                    raise fallback_error
-            logger.warning("structured call failed (attempt %s/%s): %s", i + 1, attempts, e)
-    raise last_err  # type: ignore[misc]
-
-
 class StudioState(TypedDict):
     project_id: str | None
     topic: str
     audience_level: str
     subject: str | None
+    research_brief: dict | None
     outline: dict | None
     storyboard: dict | None
     issues: list[str]
@@ -110,13 +41,44 @@ class StudioState(TypedDict):
     approved: bool
 
 
+async def research_node(state: StudioState) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.research_enabled:
+        return {"research_brief": None}
+    from app.agents.researcher import research_topic
+
+    brief = await research_topic(
+        state["topic"],
+        state["audience_level"],
+        state.get("subject"),
+        project_id=state.get("project_id"),
+    )
+    if brief and state.get("project_id"):
+        from app.db.repositories import project_repo
+
+        project_repo.update(
+            state["project_id"],
+            research_brief=json.dumps(brief, ensure_ascii=False),
+        )
+    return {"research_brief": brief or None}
+
+
 async def write_node(state: StudioState) -> dict[str, Any]:
     subject = f"\nSubject: {state['subject']}" if state["subject"] else ""
+    from app.agents.researcher import brief_to_text
+
+    research = brief_to_text(state.get("research_brief"))
+    research_block = (
+        f"\n\nWeb research brief (ground your outline in these — prefer the "
+        f"analogies and correct any misconception):\n{research}"
+        if research
+        else ""
+    )
     outline = await structured_call(
         planner_llm(),
         [
             ("system", WRITER_SYSTEM_PROMPT),
-            ("human", f"Topic: {state['topic']}\nAudience level: {state['audience_level']}{subject}"),
+            ("human", f"Topic: {state['topic']}\nAudience level: {state['audience_level']}{subject}{research_block}"),
         ],
         ScriptOutline,
         project_id=state.get("project_id"),
@@ -128,6 +90,9 @@ async def write_node(state: StudioState) -> dict[str, Any]:
 
 
 async def direct_node(state: StudioState) -> dict[str, Any]:
+    from app.agents.researcher import brief_to_text
+
+    research = brief_to_text(state.get("research_brief"))
     if state["issues"]:
         prompt = director_revision_prompt(
             json.dumps(state["storyboard"], indent=2), state["issues"]
@@ -138,6 +103,7 @@ async def direct_node(state: StudioState) -> dict[str, Any]:
             state["topic"],
             state["audience_level"],
             state["subject"],
+            research_brief=research,
         )
     storyboard = await structured_call(
         planner_llm(),
@@ -180,12 +146,14 @@ def revise_node(state: StudioState) -> dict[str, Any]:
 
 def build_studio_graph():
     g = StateGraph(StudioState)
+    g.add_node("research", research_node)
     g.add_node("write", write_node)
     g.add_node("direct", direct_node)
     g.add_node("review", review_node)
     g.add_node("revise", revise_node)
 
-    g.set_entry_point("write")
+    g.set_entry_point("research")
+    g.add_edge("research", "write")
     g.add_edge("write", "direct")
     g.add_edge("direct", "review")
     g.add_conditional_edges("review", after_review, {"revise": "revise", END: END})
@@ -203,6 +171,7 @@ async def run_studio(topic: str, audience_level: str, subject: str | None, proje
             "project_id": project_id,
             "audience_level": audience_level,
             "subject": subject,
+            "research_brief": None,
             "outline": None,
             "storyboard": None,
             "issues": [],

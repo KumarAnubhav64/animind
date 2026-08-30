@@ -6,10 +6,10 @@ from typing import Any, Awaitable, Callable, Literal, TypedDict
 from langgraph.graph import END, StateGraph
 from moviepy import AudioFileClip
 
-from app.agents.llm import coder_llm, fallback_llm, fixer_llm
+from app.agents.llm import _fit_to_budget, _CODER_MAX_TOKENS, _FIXER_MAX_TOKENS, coder_llm, fallback_llm, fixer_llm
 from app.agents.tts import synthesize_speech
 from app.config import get_settings
-from app.pipeline.renderer import normalize_manim_code, preflight_visual_code, render_manim
+from app.pipeline.renderer import normalize_manim_code, render_manim, validate_visual_code
 from app.pipeline.telemetry import record as _record_call
 from app.pipeline.video import merge_audio_video
 from app.prompts import (
@@ -405,12 +405,18 @@ async def generate_code(state: SceneState, feedback: str = "") -> dict[str, Any]
         state.get("context") or "",
         muted=state.get("muted", False),
     )
+    feedback = (feedback or "").strip()
+    if len(feedback) > 1500:
+        feedback = feedback[:1500] + " …[truncated]"
     response = await llm_with_retry(
         coder_llm(),
-        [
-            ("system", CODER_SYSTEM_PROMPT),
-            ("human", f"{msg}\n\nAddress this quality feedback:\n{feedback}" if feedback else msg),
-        ],
+        _fit_to_budget(
+            [
+                ("system", CODER_SYSTEM_PROMPT),
+                ("human", f"{msg}\n\nAddress this quality feedback:\n{feedback}" if feedback else msg),
+            ],
+            _CODER_MAX_TOKENS,
+        ),
         project_id=state.get("project_id"),
     )
     return {
@@ -424,23 +430,26 @@ async def generate_code(state: SceneState, feedback: str = "") -> dict[str, Any]
 async def fix_code(state: SceneState) -> dict[str, Any]:
     response = await llm_with_retry(
         fixer_llm(state["attempts"]),
-        [
-            ("system", FIXER_SYSTEM_PROMPT),
-            (
-                "human",
-                fixer_user_prompt(
-                    state["code"] or "",
-                    state["error"] or "",
-                    state["attempts"],
-                    state.get("context") or "",
-                    muted=state.get("muted", False),
+        _fit_to_budget(
+            [
+                ("system", FIXER_SYSTEM_PROMPT),
+                (
+                    "human",
+                    fixer_user_prompt(
+                        state["code"] or "",
+                        state["error"] or "",
+                        state["attempts"],
+                        state.get("context") or "",
+                        muted=state.get("muted", False),
+                    ),
                 ),
-            ),
-        ],
+            ],
+            _FIXER_MAX_TOKENS,
+        ),
         project_id=state.get("project_id"),
     )
     candidate = normalize_manim_code(extract_python_code(response.content))
-    candidate_error = preflight_visual_code(candidate)
+    candidate_error = validate_visual_code(candidate)
     if not candidate.strip() or candidate_error:
         logger.warning(
             "fixer returned an invalid candidate for scene %s; requesting fresh codegen",

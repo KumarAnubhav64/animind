@@ -121,6 +121,7 @@ class SpecCompiler:
         self.bbox_extents: dict[str, tuple[float, float]] = {}
         self.visual_count = 0
         self.use_3d = False  # auto-set when 3D shapes are used
+        self.axes_ids: set[str] = set()  # ids created via add_axes (valid add_curve targets)
 
     # ---------------------------------------------------------------- helpers
 
@@ -423,6 +424,7 @@ class SpecCompiler:
         self.emit(f"_keep_in_frame({_var(a.id)})")
         self.boxes[a.id] = (x, y)
         self.regions[a.id] = (a.region or "center").lower()
+        self.axes_ids.add(a.id)
         if a.expr:
             expr = _safe_expr(a.expr)
             self.emit(f"{_var(a.id)}_plot = {_var(a.id)}.plot(lambda x: {expr}, color={color})")
@@ -436,10 +438,33 @@ class SpecCompiler:
             self._anim_line(a, _var(a.id), default_rt=1.5)
         self.visual_count += 1
 
-    def op_add_bars(self, a: SpecAction):
-        if not a.id or not a.values:
+    def op_add_curve(self, a: SpecAction):
+        """Plot a function curve onto an existing axes (the math plotter)."""
+        if not a.id or not a.target or a.target not in self.axes_ids:
             return
         self._replace_existing(a.id)
+        expr = _safe_expr(a.expr or "0")
+        if a.offset:
+            offset = float(a.offset)
+            sign = "+" if offset >= 0 else "-"
+            expr = f"({expr}) {sign} {abs(offset):.2f}"
+        color = _color(a.color, "BLUE")
+        axes_var = _var(a.target)
+        self.emit(f"{_var(a.id)} = {axes_var}.plot(lambda x: {expr}, color={color})")
+        self.emit(f"{_var(a.id)}.set_stroke(width=4)")
+        # A curve lives inside its axes (data coords); only record a hint box
+        # for label routing. Keep it thin so it never scatters other objects.
+        tx, ty = self.boxes.get(a.target, (0.0, -0.4))
+        self.boxes[a.id] = (tx, ty)
+        self.regions[a.id] = self.regions.get(a.target, "center")
+        self.bbox_extents[a.id] = (0.1, 0.1)
+        self.known.add(a.id)
+        self.visual_count += 1
+        self._anim_line(a, _var(a.id), default_rt=1.8)
+
+    def op_add_bars(self, a: SpecAction):
+        if not a.id or not a.values:
+            return        self._replace_existing(a.id)
         vals = ", ".join(f"{v:.2f}" for v in a.values)
         color = _color(a.color, "BLUE")
         self.emit(
@@ -617,7 +642,7 @@ class SpecCompiler:
             "set_title": self.op_set_title, "add_text": self.op_add_text,
             "add_equation": self.op_add_equation, "add_shape": self.op_add_shape,
             "add_asset": self.op_add_asset, "add_axes": self.op_add_axes,
-            "add_bars": self.op_add_bars,
+            "add_bars": self.op_add_bars, "add_curve": self.op_add_curve,
             "label": self.op_label, "connect": self.op_connect,
             "animate": self.op_animate, "transform": self.op_transform,
             "move": self.op_move, "rotate": self.op_rotate, "pulse": self.op_pulse,

@@ -220,6 +220,8 @@ async def public_config():
             "enabled": settings.vision_critique,
             "frames": settings.vision_max_frames,
             "width": settings.vision_frame_width,
+            "fallback": settings.vision_model_fallback,
+            "fallback_vision_capable": settings.vision_model_fallback_vision_capable,
         },
     }
 

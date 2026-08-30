@@ -25,6 +25,7 @@ class Project(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     final_video_path: Mapped[str | None] = mapped_column(String, nullable=True)
     visual_ledger: Mapped[str | None] = mapped_column(Text, nullable=True)
+    research_brief: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     def to_dict(self) -> dict:
@@ -37,6 +38,7 @@ class Project(Base):
             "error": self.error,
             "final_video_path": self.final_video_path,
             "visual_ledger": self.visual_ledger,
+            "research_brief": self.research_brief,
             "created_at": str(self.created_at),
         }
 

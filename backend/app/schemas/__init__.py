@@ -83,6 +83,7 @@ class ProjectOut(BaseModel):
     status: ProjectStatus
     error: str | None
     final_video_path: str | None = None
+    research_brief: str | None = None
     scenes: list[SceneOut] = Field(default_factory=list)
 
 
@@ -91,14 +92,27 @@ def new_id() -> str:
 
 
 CODE_FENCE_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
+# Some fallback models emit XML tool-call scaffolding (e.g. `<tool_call>`, `<function=...>`,
+# `<parameter=...>`) instead of a pure code block. Strip it before extracting the Python.
+TOOL_CALL_BLOCK_RE = re.compile(
+    r"<tool_call>.*?</tool_call>|<function=\w*>.*?</function>|<parameter=\w*>.*?</parameter>",
+    re.DOTALL,
+)
+
+
+def _strip_tool_call_scaffolding(text: str) -> str:
+    cleaned = TOOL_CALL_BLOCK_RE.sub("", text)
+    lines = [ln for ln in cleaned.splitlines() if not ln.strip().startswith("<")]
+    return "\n".join(lines).strip()
 
 
 def extract_python_code(text: str) -> str:
-    """Extract python code from an LLM response (strips markdown fences)."""
+    """Extract python code from an LLM response (strips markdown fences and
+    tool-call scaffolding that some fallback models emit)."""
     match = CODE_FENCE_RE.search(text)
     if match:
-        return match.group(1).strip()
-    text = text.strip()
+        return _strip_tool_call_scaffolding(match.group(1)).strip()
+    text = _strip_tool_call_scaffolding(text.strip())
     if text.startswith("```"):
         text = text.strip("`").lstrip("python").strip()
     return text

@@ -84,6 +84,13 @@ def _action_summary(action: dict[str, Any]) -> str:
     return f"{op} {action.get('id', '')}"
 
 
+def _region_field(r, key: str, default=""):
+    """Read a field from a LayoutRegion model or a raw dict."""
+    if isinstance(r, dict):
+        return r.get(key, default)
+    return getattr(r, key, default)
+
+
 def _layout_diagram(spec: SceneSpec) -> str:
     """ASCII art layout from spec.layout regions."""
     if not spec.layout or not spec.layout.regions:
@@ -93,26 +100,27 @@ def _layout_diagram(spec: SceneSpec) -> str:
     parts.append("│                     MAIN                    │")
     if len(regions) == 1:
         r = regions[0]
-        parts.append(f"│  ┌───────────────┐     {r['name'][:15]:<15} │")
-        parts.append(f"│  │               │     {r.get('area', ''):<15} │")
+        name = _region_field(r, "name")[:15]
+        area = _region_field(r, "area")
+        parts.append(f"│  ┌───────────────┐     {name:<15} │")
+        parts.append(f"│  │               │     {area:<15} │")
         parts.append("│  └───────────────┘                         │")
     else:
+        shown = regions[:3]
         row = "│"
-        for r in regions[:3]:
-            label = r["name"][:14]
-            area = r.get("area", "")
+        for r in shown:
             row += f"  ┌{'─' * 14}┐"
         parts.append(row)
         row = "│"
-        for r in regions[:3]:
-            row += f"  │{r['name'][:14]:^14}│"
+        for r in shown:
+            row += f"  │{_region_field(r, 'name')[:14]:^14}│"
         parts.append(row)
         row = "│"
-        for r in regions[:3]:
-            row += f"  │{r.get('area', ''):^14}│"
+        for r in shown:
+            row += f"  │{_region_field(r, 'area')[:14]:^14}│"
         parts.append(row)
         row = "│"
-        for _ in regions[:3]:
+        for _ in shown:
             row += "  └──────────────┘"
         parts.append(row)
     parts.append("├─────────────────────────────────────────────┤")

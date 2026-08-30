@@ -25,15 +25,18 @@ from app.schemas.spec import SceneSpec
 logger = logging.getLogger("animind.math")
 
 KNOWN_OPS = {
-    "set_title", "add_text", "add_equation", "add_shape", "add_axes",
-    "add_bars", "label", "connect", "animate", "transform", "move",
-    "remove", "wait",
+    "set_title", "add_text", "add_equation", "add_shape", "add_asset", "add_axes",
+    "add_bars", "add_curve", "label", "connect", "animate", "transform", "move",
+    "rotate", "pulse", "remove", "clear", "wait",
 }
 COLORS = {
     "blue", "red", "green", "yellow", "teal", "purple", "orange",
     "gold", "white", "grey", "gray", "pink",
 }
-SHAPES = {"circle", "square", "dot", "triangle", "diamond", "ring"}
+SHAPES = {
+    "circle", "square", "dot", "triangle", "diamond", "ring",
+    "sphere", "cube", "cylinder", "cone", "torus",
+}
 
 _MATH_WORDS = {
     "area", "sum", "equation", "formula", "equals", "derivative", "integral",

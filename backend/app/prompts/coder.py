@@ -43,12 +43,44 @@ that follows a moving point; a curve that grows as the dot moves; a smooth Trans
 representations. Do not leave a static diagram on screen for more than a few seconds — if the \
 narration says "rotates/spins/sweeps/approaches", show exactly that motion. See the MOTION \
 FEW-SHOTS below and reuse those structures.
+- CAMERA WORK (use the camera, never a static frame): the scene class is \
+`MovingCameraScene`, so you can pan and zoom. Drive the camera with \
+`self.play(self.camera.frame.animate.shift(...).scale(...), run_time=3)` or \
+`self.play(self.camera.frame.animate.move_to(...), run_time=3)`. Use a zoom-IN to focus the \
+viewer on a small detail (e.g. `.scale(0.6)` targeting one region) and a zoom-OUT / pan to \
+reveal the full picture. Alternate shots between wide and close-up so the video feels alive. \
+Never let the camera frame include areas outside the drawn content for long; center it on the \
+action.
+- SHOT ISOLATION (non-negotiable, the #1 way videos get messy): every BEAT is a new SHOT. \
+Before introducing a new full-screen idea, REMOVE or FADE OUT the previous shot's mobjects \
+(`self.play(FadeOut(prev_group, run_time=2))`, `self.play(*[FadeOut(m) for m in prev], \
+run_time=2)`, or `self.clear()`). Old and new shots must NEVER be on screen at the same time. \
+If you keep the title, keep it as the one persistent element; fade everything else out before \
+the next beat starts. The exception is a build-up beat (e.g. dots accumulating into a curve), \
+where new elements ADD to the existing one — that is fine, but a brand-new unrelated diagram \
+must first clear the old one. Do not place the new diagram in a tiny corner to "make room" — \
+that is clutter; clear the frame instead.
 - ANIMATION PACING (critical for educational content): use `run_time=2` for simple \
 appearances (Write, FadeIn, Create); `run_time=3` for complex motions (Transform, morph, \
 shift+rotate); `run_time=4` for continuous motion (ValueTracker sweeps, tracing curves). \
 Never use the default `run_time=1` — it is too fast for learners. End each beat with \
 `self.wait(1)` or `self.wait(2)` so viewers absorb the idea before the next one starts. \
 Total animation time should roughly match the narration audio duration.
+- VISIBILITY (non-negotiable): every narrated object must be visible in the FINAL frame. \
+Never call `.set_opacity(0)` or `.fade(1)` on a mobject and then FadeIn it — FadeIn ends at \
+the mobject's current opacity, so an opacity-0 mobject stays invisible forever (Manim 0.21 \
+FadeIn targets the mobject itself). FadeIn ALREADY starts from invisible, so never force \
+opacity to 0 before fading in. To hide a background element, hide the PARENT group (e.g. \
+`background_group.set_opacity(0)` while animating children separately) or simply do not add \
+it yet. Every line, curve, arrow, and label drawn by the code must be plainly visible on \
+screen — a "curve" that renders invisible is a total failure.
+- OUTPUT FORMAT (non-negotiable): reply with ONLY a single Python code block, no prose, no \
+explanation, and NEVER emit tool calls, XML tags, or `<function=...>` scaffolding. The entire \
+response must be a file that `python -m manim render` can run directly.
+- FILLING AREAS UNDER CURVES: `Axes.get_area(graph, x_range=[a, b])` requires a PLOTTED \
+graph mobject as its first argument — always `axes.get_area(axes.plot(func), x_range=[...])`, \
+never pass a bare function or lambda. The second argument (`x_range`) must be a tuple/list of \
+numbers, never a function.
 """
 
 MANIM_CHEATSHEET = """\
@@ -357,6 +389,24 @@ Lesson: every `self.play` has an explicit `run_time` ≥ 2. Every beat ends with
 always has time to read labels and understand the visual before the next change.
 """
 
+COMPACT_FEW_SHOT = r"""COMPACT EXAMPLE - three non-overlapping sub-plots:
+```python
+from manim import *
+
+class VideoScene(Scene):
+    def construct(self):
+        self.camera.background_color = "#1c1c1c"
+        title = Text("Building a Signal", font_size=44).to_edge(UP)
+        self.play(Write(title), run_time=2)
+        ax = lambda x: Axes(x_range=[-3, 3, 1], y_range=[-1.5, 1.5, 1],
+                            x_length=3.4, y_length=2.2).shift(x * 4.2)
+        self.play(*[Create(ax(x)) for x in (-2, 0, 2)], run_time=2)
+        self.play(*[Create(ax(x).plot(lambda u: np.sin((i + 1) * u), color=BLUE))
+                    for i, x in enumerate((-2, 0, 2))], run_time=3)
+        self.wait(2)
+```
+Lesson: each sub-plot gets its OWN narrow axes (x_length ~3.4) spaced ~4.2 apart so they never overlap; label alternate sides."""
+
 
 CODER_SYSTEM_PROMPT = f"""\
 You are an expert Manim Community Edition animator who creates clean, elegant, \
@@ -392,11 +442,11 @@ small lonely object in the center.
 - All LaTeX must compile: wrap in MathTex, escape braces properly.
 - Keep code deterministic: no randomness without a seed.
 
-{FEW_SHOT_EXAMPLES}
-
 {MOTION_FEW_SHOTS}
 
 {QUALITY_FEW_SHOTS}
+
+{COMPACT_FEW_SHOT}
 """
 
 
@@ -421,7 +471,7 @@ def coder_user_prompt(
         else ""
     )
     continuity = (
-        f"\nEarlier scenes in this video (preserve their visual language):\n{context}\n"
+        f"\nEarlier scenes in this video (preserve their visual language):\n{context[:1200]}\n"
         "Reuse the same shape and color for recurring concepts, briefly re-introduce "
         "important motifs when needed, and do not contradict the established diagram.\n"
         if context

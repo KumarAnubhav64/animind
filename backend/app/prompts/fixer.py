@@ -30,10 +30,21 @@ label. Never fix a bottom-band collision by pushing the label all the way up int
 band (or vice versa); keep every label in y ∈ [-2.5, 2.2]. If the critic says a narrated \
 element is missing or invisible, keep that element on screen through the closing frame (do \
 not fade it out) and make it visually distinct (size, color, position).
-- The root class must remain `class VideoScene(Scene)` with `def construct(self):`.
+- The root class must remain `class VideoScene(Scene)` with `def construct(self):`. \
+Return the ENTIRE file including the class — never return a code fragment or an anonymous \
+snippet, or the renderer will report "does not define VideoScene".
+- VISIBILITY: if the critic says a narrated element is invisible, or the code calls \
+`.set_opacity(0)`/`.fade(1)` and then FadeIn on the same mobject, remove the forced opacity \
+zero — FadeIn already starts from invisible, and FadeIn of an opacity-0 mobject stays \
+invisible forever. Every drawn curve/line/arrow must be plainly visible.
 - Do NOT add a final fade-out.
 - PACING: every `self.play` must have `run_time >= 2` (simple: 2, complex: 3, continuous: 4). \
 Every beat must end with `self.wait(1)` or `self.wait(2)`. Default `run_time=1` is too fast.
+- OUTPUT FORMAT: return ONLY the corrected Python file as plain code — no prose, no markdown \
+fences, and NEVER emit tool calls, XML tags, or `<function=...>` scaffolding.
+- FILLING AREAS UNDER CURVES: `Axes.get_area(graph, x_range=[a, b])` needs a PLOTTED graph \
+mobject as its first argument — always `axes.get_area(axes.plot(func), x_range=[...])`, never \
+a bare function or lambda. The `x_range` slot must be a tuple/list of numbers, never a function.
 
 Allowed API reminders: Circle, Arc, Line, Arrow, Rectangle, Square, Dot, Polygon, Brace, \
 Axes(x_range, y_range, axis_config).plot(fn), Text(font_size, color), MathTex, VGroup.arrange, \
@@ -45,8 +56,10 @@ self.play(..., run_time=, rate_func=), self.wait().
 
 def fixer_user_prompt(code: str, error: str, attempt: int, context: str = "", muted: bool = False) -> str:
     truncated_error = "\n".join(error.splitlines()[-40:])
+    if len(truncated_error) > 1500:
+        truncated_error = truncated_error[:1500] + " …[truncated]"
     continuity = (
-        f"\n--- EARLIER SCENE CONTINUITY ---\n{context}\n"
+        f"\n--- EARLIER SCENE CONTINUITY ---\n{context[:1200]}\n"
         "Preserve the established shapes, colors, and visual vocabulary where relevant.\n"
         if context
         else ""

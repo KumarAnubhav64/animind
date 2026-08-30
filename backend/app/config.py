@@ -32,9 +32,11 @@ class Settings(BaseSettings):
     codegen_mode: str = "spec"  # spec (declarative, compiled) | raw (LLM writes Manim)
     tts_enabled: bool = True
     vision_model: str = "claude-opus-4-8"
-    vision_model_fallback: str | None = None  # Groq vision-capable model (e.g. qwen/qwen3.8-27b) when the primary vision model is down
+    vision_model_fallback: str | None = "qwen/qwen3.6-27b"  # Groq free-tier vision model (text+image)
+    vision_model_fallback_vision_capable: bool = True  # qwen3.6-27b is multimodal; it may gate visual QA
     vision_critique: bool = True  # screenshot-based visual QA before accepting a scene
     vision_max_frames: int = 3
+    vision_max_frames_fallback: int = 2  # free-tier Groq vision: fixed ~2740 tokens/image, 8K TPM -> 2 frames
     vision_frame_width: int = 480
     vision_max_attempts: int = 3  # inspect the original plus up to two repaired candidates
     router_api_key: str | None = None  # AgentRouter (OpenAI-compatible)
@@ -43,6 +45,9 @@ class Settings(BaseSettings):
     max_scenes: int = 4
     max_narration_seconds: int = 35
     max_storyboard_revisions: int = 2
+
+    research_enabled: bool = True  # web-search the topic before the Writer plans
+    research_results_per_query: int = 4
 
     media_dir: str = "media"
     database_url: str = "animind.db"
