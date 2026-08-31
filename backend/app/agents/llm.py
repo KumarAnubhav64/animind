@@ -1,19 +1,51 @@
 import os
+import time
+import random
+import asyncio
 
 from functools import lru_cache
+from typing import TypeVar
 
 from langchain_groq import ChatGroq
 
 from app.config import get_settings
 
+T = TypeVar("T")
+
 # Optional LangSmith tracing: if enabled in config AND an API key is present,
-# turn on tracing before any langchain call happens. No key -> no tracing.
+# turn tracing on before any langchain call happens. No key -> no tracing.
 _settings = get_settings()
 if _settings.langsmith_tracing and os.environ.get("LANGSMITH_API_KEY"):
     os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 # Free tier is TPM-constrained: let the SDK back off on 429s instead of failing.
 _LLM_KWARGS = {"max_retries": 6, "timeout": 120}
+
+
+async def with_backoff(coro, *, max_retries: int = 5, base: float = 2.0, cap: float = 60.0):
+    """Run an async callable with exponential backoff + jitter on 429/500 errors."""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro
+        except Exception as exc:
+            status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+            if attempt >= max_retries or status not in (429, 500, 502, 503):
+                raise
+            last_exc = exc
+            delay = min(cap, base * (2 ** attempt) + random.uniform(0, 1))
+            if status == 429:
+                retry_after = getattr(exc, "response", None)
+                if retry_after is not None:
+                    headers = getattr(retry_after, "headers", {})
+                    ra = headers.get("retry-after") or headers.get("Retry-After")
+                    if ra:
+                        try:
+                            delay = max(delay, float(ra))
+                        except (ValueError, TypeError):
+                            pass
+            await asyncio.sleep(delay)
+    raise last_exc
 
 # Groq's free tier caps each request at 8000 tokens (input + reserved output).
 # gpt-oss-120b's DEFAULT output reservation (~3072) is the natural cap for a
@@ -42,19 +74,21 @@ def _groq(model: str, temperature: float, api_key: str | None = None, max_tokens
 
 # Hard ceiling Groq's free tier enforces per request (input + reserved output).
 _GROQ_REQUEST_CAP = 8000
-# Stay under the cap even if the tokenizer estimate is slightly off.
-_GROQ_REQUEST_MARGIN = 300
+# Stay well under the cap — the tokenizer estimate can undercount by ~5-8%,
+# and some models use a non-standard tokenizer. A larger margin prevents 413s.
+_GROQ_REQUEST_MARGIN = 500
 # Rough bytes/token ratio used only when tiktoken is unavailable.
 _BYTES_PER_TOKEN = 4
 
 def _estimate_tokens(text: str) -> int:
-    """Best-effort token estimate. Prefers tiktoken when present (it is in the
-    backend env), otherwise falls back to a bytes/4 heuristic with headroom."""
+    """Best-effort token estimate. Prefers tiktoken when present, otherwise
+    falls back to a bytes/4 heuristic with headroom. Groq uses a tokenizer
+    close to cl100k_base but not identical, so we add a safety factor."""
     try:
         import tiktoken
 
         enc = tiktoken.get_encoding("cl100k_base")
-        return len(enc.encode(text))
+        return int(len(enc.encode(text)) * 1.08)
     except Exception:  # noqa: BLE001
         return int(len(text) / _BYTES_PER_TOKEN)
 

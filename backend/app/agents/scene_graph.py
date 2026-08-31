@@ -82,8 +82,10 @@ async def llm_with_retry(
                         settings.fallback_model,
                     )
                     if messages:
+                        from app.agents.llm import _fit_to_budget, _CODER_MAX_TOKENS
                         fallback = fallback_llm()
-                        result = await fallback.ainvoke(messages)
+                        fallback_msgs = _fit_to_budget(messages, _CODER_MAX_TOKENS)
+                        result = await fallback.ainvoke(fallback_msgs)
                         _record_call(
                             model=_model_name(fallback), result=result,
                             latency_ms=int((asyncio.get_event_loop().time() - start) * 1000),
