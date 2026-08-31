@@ -1,0 +1,39 @@
+"""Lightweight text summarizer for reducing token usage in LLM calls.
+
+Uses a fast, cheap model to compress verbose text into a shorter version
+that preserves key facts. Falls back to simple truncation if the LLM call
+fails — the pipeline must never block on summarization.
+"""
+
+import logging
+
+from app.agents.llm import fallback_llm
+
+logger = logging.getLogger("animind.summarizer")
+
+SUMMARIZE_SYSTEM_PROMPT = """\
+You are a text compressor for an animation studio. You receive a piece of text \
+about a video project and must condense it to roughly 1/3 of its original length \
+while preserving every factual detail, proper noun, number, and technical term. \
+Drop filler phrases, redundant descriptions, and verbose transitions. \
+Return ONLY the condensed text, no commentary."""
+
+
+async def summarize(text: str, *, max_chars: int = 1500) -> str:
+    """Compress `text` to roughly max_chars. Never raises — falls back to \
+    truncation if the LLM call fails."""
+    if len(text) <= max_chars:
+        return text
+    try:
+        llm = fallback_llm(temperature=0.0)
+        resp = await llm.ainvoke([
+            ("system", SUMMARIZE_SYSTEM_PROMPT),
+            ("human", f"Condense the following to under {max_chars} characters:\n\n{text[:4000]}"),
+        ])
+        result = resp.content.strip()
+        if result and len(result) < len(text):
+            logger.debug("summarizer: %d -> %d chars", len(text), len(result))
+            return result[:max_chars]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("summarizer: LLM fallback to truncation: %s", exc)
+    return text[:max_chars] + "\n…[truncated]"

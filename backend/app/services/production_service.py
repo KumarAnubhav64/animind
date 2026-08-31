@@ -161,18 +161,26 @@ def _continuity_context(scene: Scene) -> str:
     return "\n".join(parts)
 
 
-def _prior_scene_context(project_id: str, before_idx: int) -> str:
+async def _prior_scene_context(project_id: str, before_idx: int) -> str:
+    """Summarize prior scenes into a compact continuity context.
+
+    Uses an LLM summarizer to compress the text to ~1/3 of original length,
+    falling back to simple truncation if the summarizer fails.
+    """
+    from app.agents.summarizer import summarize
+
     prior = [
         scene
         for scene in scene_repo.list_for_project(project_id)
         if scene.idx < before_idx and scene.status == "ready"
     ]
+    if not prior:
+        return ""
     parts = [_continuity_context(scene) for scene in prior]
-    # Cap total context to avoid exceeding LLM context window (~3K chars = ~750 tokens)
     joined = "\n\n".join(parts)
-    if len(joined) > 3000:
-        joined = joined[:2800] + "\n\n[context truncated for length]"
-    return joined
+    if len(joined) <= 1500:
+        return joined
+    return await summarize(joined, max_chars=1500)
 
 
 def _reset_scene(scene: Scene):
@@ -199,6 +207,8 @@ async def _produce_sequential(
     scenes: list[Scene], start_idx: int = 0
 ) -> dict[int, bool]:
     """Produce a suffix in order, carrying only delivered prior scenes forward."""
+    from app.agents.summarizer import summarize
+
     results: dict[int, bool] = {}
     context_parts: list[str] = []
     for scene in scenes:
@@ -209,7 +219,10 @@ async def _produce_sequential(
                 continue
             context_parts.append(_continuity_context(fresh))
             continue
-        ok = await produce_scene(scene, context="\n\n".join(context_parts))
+        context_raw = "\n\n".join(context_parts)
+        # Compress the accumulated context so later scenes don't blow the budget
+        context = await summarize(context_raw, max_chars=1500) if len(context_raw) > 1500 else context_raw
+        ok = await produce_scene(scene, context=context)
         results[scene.idx] = ok
         fresh = scene_repo.get(scene.id)
         if ok and fresh and fresh.status == "ready":
