@@ -74,8 +74,11 @@ entry → write → direct → review ──approved→ END
 - **Producer** (`review_node`) → `FeasibilityReport` `{approved, issues}`. Rejects
   storyboards that can't render (vague visuals, too long, etc.).
 - All structured LLM calls go through `structured_call(...)` (`studio_graph.py:32`):
-  3 attempts, Groq `json_schema` method (tool-calls fail on nested schemas), with
-  **backup Groq key + fallback model** handling for daily-cap errors.
+  4 attempts, Groq `json_schema` method (tool-calls fail on nested schemas), with
+  **backup Groq key + fallback model** escalation for daily-cap (`tokens per day`)
+  AND JSON-schema validation failures (`json_validate_failed`). After the first
+  validation failure a "reply with only valid JSON" nudge is appended to the human
+  turn so later retries aren't byte-identical to the attempt that failed.
 - Each scene is persisted (`scene_repo.create`, status=`pending`) and an assistant chat
   message lists the planned scenes. Storyboard failure → project `failed`.
 
@@ -193,6 +196,15 @@ Nodes `codegen` / `fix` / `render`.
    (temperature `max(0, 0.4 - 0.1*attempt)` — explores early, exploits late) up to
    `max_scene_retries=5`. A fixed candidate that still fails preflight triggers a fresh
    full codegen.
+5. **Example memory** (`agents/example_memory.py`): the static few-shots in the system
+   prompt are the first thing `_fit_to_budget` drops under the 8k token cap, so a
+   dynamic card for the *current* scene is appended to the **tail** of the human turn
+   (last thing trimmed). `lookup_example` keyword/tag-scores a small offline corpus of
+   8 house-style cards distilled from MIT-licensed official gallery scenes (provenance
+   in `research/MANIM_FEW_SHOTS.md`) against title + narration + visual description
+   (+ the renderer error in the Fixer). Returns nothing when nothing matches. Wired
+   into `generate_code` and `fix_code`; toggled by `example_memory_enabled`, card count
+   by `example_memory_max_entries`.
 
 ---
 
@@ -303,6 +315,8 @@ drafting → producing → stitching → ready
 | `tts_enabled` | true | PlayAI narration |
 | `vision_critique` | true | screenshot QA |
 | `vision_model_fallback` | unset (e.g. `qwen/qwen3.8-27b`) | Groq vision model used when the primary vision model is down |
+| `example_memory_enabled` | true | inject a distilled MIT-gallery card into raw codegen/Fixer |
+| `example_memory_max_entries` | 1 | cards per lookup (1 keeps the ~8k token budget intact) |
 | `max_scene_retries` | 5 | render/fix attempts |
 | `max_scenes` | 4 | scenes per project |
 | `media_dir` | `media` | render artifacts |

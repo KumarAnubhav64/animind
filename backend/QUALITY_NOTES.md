@@ -9,8 +9,11 @@
   - `_clean()` flattens newlines/quotes before embedding text/tex in code lines
   - `_safe_expr()` AST-strips undefined names (LaTeX-style C0/k) from plot exprs
   - math preamble (sin/cos/exp/e/pi) for plot expressions
-- Groq json_schema on SceneSpec is flaky (~2/3 calls 400 json_validate_failed);
-  structured_call retries absorb it; generate_spec delegates to raw codegen if exhausted.
+- Groq json_schema is flaky on big/nested schemas (~2/3 SceneSpec calls 400
+  json_validate_failed); structured_call absorbs it — on the first validation failure
+  it appends a "reply with only valid JSON" nudge to the prompt and escalates to the
+  backup Groq key, then the fallback model, before exhausting remaining primary retries.
+  generate_spec delegates to raw codegen if exhausted.
 
 ## Layout + explanation quality pass (Aug 26, 2026)
 Research grounding: Manimator (arXiv 2507.14306) — "Element Layout" is its own quality
