@@ -446,7 +446,12 @@ async def regenerate_scene(project_id: str, scene_id: str):
     except Exception as e:  # noqa: BLE001
         logger.exception("regenerate %s failed", scene_id)
         _discard_final(project_id)
-        scene_repo.update(scene_id, status="failed", error=str(e)[:2000])
+        # Only mark the scene as failed if it doesn't already have a video.
+        # A restitch failure after successful scene production should not
+        # destroy the scene's work — the user can retry the stitch later.
+        existing = scene_repo.get(scene_id)
+        if existing is None or not existing.video_path:
+            scene_repo.update(scene_id, status="failed", error=str(e)[:2000])
         project_repo.update(
             project_id,
             status="failed",

@@ -140,6 +140,47 @@ def _area_table(spec: SceneSpec) -> str:
     return "\n".join(rows)
 
 
+def layout_preview(spec: SceneSpec | None) -> dict:
+    """Compact summary of the scene's spatial blueprint for live streaming.
+
+    Resolves each named region to concrete [x, y] center coordinates — an
+    explicit `at` wins, otherwise the compiler's REGIONS anchor for that area —
+    and attaches the ASCII diagram, so the UI can show WHICH layout the spec
+    agent locked in. Returns an empty summary when the spec has no layout
+    (objects then get placed from action coordinates at compile time)."""
+    if spec is None or not spec.layout:
+        return {
+            "regions": [],
+            "notes": "",
+            "diagram": "(no layout regions — positions derive from action coordinates)",
+        }
+    from app.pipeline.spec_compiler import REGIONS
+
+    regions = []
+    for r in spec.layout.regions:
+        x = y = None
+        if r.at and len(r.at) >= 2:
+            x, y = round(r.at[0], 2), round(r.at[1], 2)
+        else:
+            anchor = REGIONS.get(r.area.lower())
+            if anchor:
+                x, y = round(anchor[0], 2), round(anchor[1], 2)
+        regions.append(
+            {
+                "name": r.name,
+                "area": r.area,
+                "x": x,
+                "y": y,
+                "description": r.description or "",
+            }
+        )
+    return {
+        "regions": regions,
+        "notes": spec.layout.notes or "",
+        "diagram": _layout_diagram(spec),
+    }
+
+
 def _generate_beat_name(index: int, actions: list[dict]) -> str:
     """Heuristic beat name from action types."""
     ops = {a.get("op", "") for a in actions}
