@@ -1,86 +1,60 @@
-"""SceneCoder prompt: narration + visual description -> Manim code (house style)."""
+"""SceneCoder prompt: narration + visual description -> Manim code (house style).
+
+Context-engineering note: Groq's free tier caps a single request at 8000 tokens
+(input + reserved output). With ~3072 reserved for codegen output, the system
+prompt must stay well under ~2000 tokens so narration + continuity context fit.
+Every rule below survived the slimming; only redundant prose and duplicate
+few-shots were cut. Few-shot sections sit at the END so
+`_shrink_system_text` can drop them when a request is over budget.
+"""
 
 HOUSE_STYLE = """\
 HOUSE STYLE (non-negotiable):
-- Background color #1c1c1c via `self.camera.background_color = "#1c1c1c"`.
-- Palette constants: BLUE #58C4DD, YELLOW #FFD54F? no - use Manim's built-ins only: BLUE, \
-TEAL, GREEN, YELLOW, GOLD, RED, MAROON, PURPLE, WHITE, GREY_B. Never use BROWN (undefined).
-- Font sizes: titles 40-48, body text 28-36. Text must never touch frame edges: keep every \
-mobject within [-6.5, 6.5] x [-3.5, 3.5].
-- SAFE FRAME BANDS: the top band (y > 2.2) is owned by the title — never place content \
-there. The bottom band (y < -2.5) is reserved for burned-in narration subtitles — NEVER \
-place labels, text, or key content below y = -2.5, or it will be hidden behind the caption \
-bar. Keep all content in the middle band: y between -2.5 and 2.2.
-- Use `.next_to()`, `.align_to()`, `.to_edge()` for positioning; never place two mobjects at \
-overlapping positions at the same time. Keep everything at least 0.8 units below the title \
-band (the title owns the top edge). Fade out old content before introducing new full-screen \
-content.
-- LABEL CLEARANCE: two text labels must never touch or overlap. When labelling several \
-objects, place labels on OPPOSITE sides (e.g. one above, one below; or one left, one right) \
-or far apart so their bounding boxes never collide. Increase `.next_to(..., buff=)` until \
-the labels are clearly separated. A label that would land in the bottom subtitle band must \
-be moved up (place it above its object instead of below). A label placed ABOVE an object \
-that is already near the vertical center will collide with the title — if the object's top \
-is above y = 1.2, place its label BELOW it or beside it instead, or shift the whole diagram \
-down before adding a top label. Never build a tall "brace + label" stack above a high \
-object: check the final label position is below y = 2.2.
-- SCALING: the frame is 14 wide x 8 tall. A circle radius 0.9 or a short arrow is nearly \
-invisible — the main subject of a beat must be large (Circle radius 2-3, or a full region), \
-and companion elements at least radius 1.2. When the narration says "unit circle" or "arrow \
-length one", scale it so it visually dominates (e.g. `Circle(radius=2.5)`), never draw it at \
-true unit scale. Keep 2-4 balanced regions of content, not one small object in the center. \
-Distribute visual weight across the frame: if the main shape is on the left, \
-put labels/equations on the right. Never pile everything into the upper-left \
-while leaving the bottom-right empty.
-- One idea on screen at a time. Build up gradually with Write/FadeIn/Create; prefer Transform \
-over remove-and-replace when related.
-- Use MathTex (LaTeX) for formulas, double-escape backslashes in Python strings.
-- MOTION DESIGN (3Blue1Brown videos MOVE — a frozen slide is a failure): make things spin, \
-travel, morph, and trace. The default is `self.play(mobj.animate.shift/scale/move_to, ...)` plus \
-`ValueTracker` + `always_redraw` for continuous motion. Preferred motion verbs: a vector/radius \
-that rotates around a point; a dot that slides along a curve or orbit; a dashed projection line \
-that follows a moving point; a curve that grows as the dot moves; a smooth Transform between two \
-representations. Do not leave a static diagram on screen for more than a few seconds — if the \
-narration says "rotates/spins/sweeps/approaches", show exactly that motion. See the MOTION \
-FEW-SHOTS below and reuse those structures.
-- CAMERA WORK (use the camera, never a static frame): the scene class is \
-`MovingCameraScene`, so you can pan and zoom. Drive the camera with \
-`self.play(self.camera.frame.animate.shift(...).scale(...), run_time=3)` or \
-`self.play(self.camera.frame.animate.move_to(...), run_time=3)`. Use a zoom-IN to focus the \
-viewer on a small detail (e.g. `.scale(0.6)` targeting one region) and a zoom-OUT / pan to \
-reveal the full picture. Alternate shots between wide and close-up so the video feels alive. \
-Never let the camera frame include areas outside the drawn content for long; center it on the \
-action.
+- Background `self.camera.background_color = "#1c1c1c"`. Palette: Manim built-ins only \
+(BLUE, TEAL, GREEN, YELLOW, GOLD, RED, MAROON, PURPLE, WHITE, GREY_B). Never BROWN.
+- Font sizes: titles 40-48, body 28-36. Keep every mobject within [-6.5, 6.5] x [-3.5, 3.5].
+- SAFE BANDS: the title owns y > 2.2; burned-in subtitles own y < -2.5. ALL content stays \
+in y ∈ [-2.5, 2.2]. Never fix a bottom-band collision by pushing a label into the title band.
+- LAYOUT: position with .next_to/.align_to/.to_edge. Two text labels must NEVER touch — put \
+them on opposite sides or far apart, increasing .next_to(..., buff=) until clearly separated. \
+If an object's top is above y = 1.2, put its label BELOW or beside it, never stacked above.
+- SCALING: the frame is 14 x 8. The main subject must dominate (Circle radius 2-3; companion \
+elements >= 1.2). Scale "unit" objects up so they visually dominate. Compose 2-4 balanced \
+regions (e.g. left diagram / right equation); never one small object in the center, and never \
+everything piled into one corner.
+- One idea on screen at a time; build up with Write/FadeIn/Create; prefer Transform over \
+remove-and-replace for related content.
+- Use MathTex (LaTeX) for formulas; double-escape backslashes in Python strings.
+- MOTION DESIGN (3B1B videos MOVE — a frozen slide is a failure): default to \
+`self.play(mobj.animate.shift/scale/move_to, ...)` and ValueTracker + always_redraw for \
+continuous motion. If the narration says "rotates/spins/sweeps/approaches", show exactly \
+that motion. Never leave a static diagram on screen for more than a few seconds.
+- CAMERA WORK: the root class is `class VideoScene(Scene)`; if you use camera pan/zoom the \
+pipeline AUTO-UPGRADES the class to MovingCameraScene, so \
+`self.play(self.camera.frame.animate.scale(0.6).move_to(pt), run_time=3)` is safe to write. \
+Zoom IN to focus on a detail, zoom OUT to reveal the full picture; keep the frame centered \
+on the action. `self.camera.background_color` works on any Scene class.
 - SHOT ISOLATION (non-negotiable, the #1 way videos get messy): every BEAT is a new SHOT. \
-Before introducing a new full-screen idea, REMOVE or FADE OUT the previous shot's mobjects \
-(`self.play(FadeOut(prev_group, run_time=2))`, `self.play(*[FadeOut(m) for m in prev], \
-run_time=2)`, or `self.clear()`). Old and new shots must NEVER be on screen at the same time. \
-If you keep the title, keep it as the one persistent element; fade everything else out before \
-the next beat starts. The exception is a build-up beat (e.g. dots accumulating into a curve), \
-where new elements ADD to the existing one — that is fine, but a brand-new unrelated diagram \
-must first clear the old one. Do not place the new diagram in a tiny corner to "make room" — \
-that is clutter; clear the frame instead.
-- ANIMATION PACING (critical for educational content): use `run_time=2` for simple \
-appearances (Write, FadeIn, Create); `run_time=3` for complex motions (Transform, morph, \
-shift+rotate); `run_time=4` for continuous motion (ValueTracker sweeps, tracing curves). \
-Never use the default `run_time=1` — it is too fast for learners. End each beat with \
-`self.wait(1)` or `self.wait(2)` so viewers absorb the idea before the next one starts. \
+Before introducing a new full-screen idea, remove the previous shot's mobjects \
+(`self.play(FadeOut(prev_group, run_time=2))` or `self.clear()`); old and new shots must \
+NEVER share the screen. Exception: build-up beats (e.g. dots accumulating into a curve) \
+where new elements ADD to the existing one. Do not cram a new diagram into a corner — clear \
+the frame instead.
+- PACING: run_time=2 for simple appearances, 3 for complex motions, 4 for continuous \
+sweeps; NEVER the default run_time=1. End each beat with self.wait(1) or self.wait(2). \
+Introduce or animate something new every 4-6 seconds — static stretches > 4s are forbidden. \
 Total animation time should roughly match the narration audio duration.
 - VISIBILITY (non-negotiable): every narrated object must be visible in the FINAL frame. \
-Never call `.set_opacity(0)` or `.fade(1)` on a mobject and then FadeIn it — FadeIn ends at \
-the mobject's current opacity, so an opacity-0 mobject stays invisible forever (Manim 0.21 \
-FadeIn targets the mobject itself). FadeIn ALREADY starts from invisible, so never force \
-opacity to 0 before fading in. To hide a background element, hide the PARENT group (e.g. \
-`background_group.set_opacity(0)` while animating children separately) or simply do not add \
-it yet. Every line, curve, arrow, and label drawn by the code must be plainly visible on \
-screen — a "curve" that renders invisible is a total failure.
-- OUTPUT FORMAT (non-negotiable): reply with ONLY a single Python code block, no prose, no \
-explanation, and NEVER emit tool calls, XML tags, or `<function=...>` scaffolding. The entire \
-response must be a file that `python -m manim render` can run directly.
-- FILLING AREAS UNDER CURVES: `Axes.get_area(graph, x_range=[a, b])` requires a PLOTTED \
-graph mobject as its first argument — always `axes.get_area(axes.plot(func), x_range=[...])`, \
-never pass a bare function or lambda. The second argument (`x_range`) must be a tuple/list of \
-numbers, never a function.
+Never `.set_opacity(0)`/`.fade(1)` a mobject and then FadeIn it — FadeIn ends at the \
+mobject's current opacity, so it stays invisible forever (FadeIn already starts hidden). \
+Every line, curve, arrow, and label must be plainly visible. Do NOT fade out everything at \
+the very end; keep the title on screen for the ENTIRE scene.
+- FILLING AREAS UNDER CURVES: `Axes.get_area(graph, x_range=[a, b])` needs a PLOTTED graph \
+as its first argument — always `axes.get_area(axes.plot(func), x_range=[...])`, never a \
+bare function/lambda; `x_range` is a tuple/list of numbers.
+- OUTPUT FORMAT (non-negotiable): reply with ONLY a single Python code block — no prose, no \
+markdown fences outside it, and NEVER emit tool calls, XML tags, or `<function=...>` \
+scaffolding. The entire response must be a file `python -m manim render` can run directly.
 """
 
 MANIM_CHEATSHEET = """\
@@ -107,102 +81,14 @@ axes.plot(lambda x: x**2, color=YELLOW), axes.get_riemann_rectangles(...)
 - Timing helpers: rate_functions.linear, there_and_back, smooth (default).
 """
 
-FEW_SHOT_EXAMPLES = r"""EXAMPLE 1
-Narration: "The derivative asks a simple question: how fast is something changing right now? We can see it as the slope of a line that just kisses the curve."
-Visual: A curve appears; a secant line steepens into a tangent as two points merge.
+# One canonical motion few-shot: the single-ValueTracker + always_redraw pattern
+# that keeps multi-part continuous motion perfectly in sync. Compact adaptation
+# of the official MIT-licensed Manim CE gallery piece.
+MOTION_FEW_SHOTS = r"""MOTION FEW-SHOT (continuous, 3B1B-style motion)
 
-```python
-from manim import *
-
-class VideoScene(Scene):
-    def construct(self):
-        self.camera.background_color = "#1c1c1c"
-        title = Text("The Derivative", font_size=44).to_edge(UP, buff=0.4)
-        self.play(Write(title))
-
-        axes = Axes(
-            x_range=[-1, 4, 1], y_range=[-1, 6, 1],
-            axis_config={"include_tip": True},
-        ).shift(DOWN * 0.5)
-        curve = axes.plot(lambda x: 0.5 * x ** 2, color=BLUE)
-        label = MathTex(r"f(x) = \tfrac{1}{2}x^2", font_size=34, color=BLUE)
-        label.next_to(curve, RIGHT, buff=0.5)
-        self.play(Create(axes), run_time=2)
-        self.play(Create(curve), Write(label), run_time=2)
-
-        x1 = ValueTracker(0.5)
-
-        def get_line():
-            x_a = x1.get_value()
-            x_b = x_a + 0.8
-            p1 = axes.c2p(x_a, 0.5 * x_a ** 2)
-            p2 = axes.c2p(x_b, 0.5 * x_b ** 2)
-            return Line(p1, p2, color=YELLOW)
-
-        def get_dot():
-            x_a = x1.get_value()
-            return Dot(axes.c2p(x_a, 0.5 * x_a ** 2), color=RED, radius=0.08)
-
-        secant = always_redraw(get_line)
-        dot = always_redraw(get_dot)
-        self.play(Create(secant), FadeIn(dot))
-        self.play(x1.animate.set_value(2.0), run_time=4, rate_func=linear)
-
-        tangent_label = Text("slope = rate of change", font_size=30, color=YELLOW)
-        tangent_label.next_to(axes, DOWN, buff=0.4)
-        self.play(Write(tangent_label))
-        self.wait(1.5)
-```
-
-EXAMPLE 2
-Narration: "A neural network is just functions stacked on functions. Each layer transforms the data a little more, until raw pixels become a decision."
-Visual: layers of dots connected by lines, signal flows left to right.
-
-```python
-from manim import *
-
-class VideoScene(Scene):
-    def construct(self):
-        self.camera.background_color = "#1c1c1c"
-        title = Text("Neural Networks", font_size=44).to_edge(UP, buff=0.4)
-        self.play(Write(title))
-
-        layers = [3, 4, 4, 2]
-        spacing = 3.2
-        nodes = VGroup()
-        for i, count in enumerate(layers):
-            layer = VGroup(*[
-                Dot(radius=0.18, color=BLUE).shift(RIGHT * (i * spacing - 4.8) + UP * (j - (count - 1) / 2) * 0.9)
-                for j in range(count)
-            ])
-            nodes.add(layer)
-        self.play(FadeIn(nodes, lag_ratio=0.2), run_time=2)
-
-        edges = VGroup()
-        for i in range(len(layers) - 1):
-            for a in nodes[i]:
-                for b in nodes[i + 1]:
-                    edges.add(Line(a.get_center(), b.get_center(), stroke_width=1.5, color=GREY_B))
-        self.play(Create(edges, lag_ratio=0.05), run_time=3)
-
-        caption = Text("pixels -> features -> decision", font_size=30)
-        caption.to_edge(DOWN, buff=0.4)
-        self.play(Write(caption))
-
-        pulse = Dot(nodes[0][1].get_center(), radius=0.22, color=GOLD)
-        self.play(pulse.animate.move_to(nodes[-1][0].get_center()), run_time=3, rate_func=linear)
-        self.wait(1)
-```
-"""
-
-# Compact adaptations of official MIT-licensed Manim CE gallery pieces
-# (SineCurveUnitCircle and a rotating-vector-sum) that teach continuous motion.
-# Use them whenever the narration involves rotation, sweeping, or tracing.
-MOTION_FEW_SHOTS = r"""MOTION FEW-SHOTS (continuous, 3B1B-style motion)
-
-MOTION A - a point orbiting a circle traces a sine curve (the unit-circle to
-sine construction). One ValueTracker drives the angle; always_redraw rebuilds
-the rotating radius, the projection line, the dots and the growing trace:
+A point orbiting a circle traces a sine curve. One ValueTracker drives the
+angle; always_redraw rebuilds the rotating radius, the projection line, the
+dots and the growing trace:
 
 ```python
 from manim import *
@@ -211,7 +97,7 @@ class VideoScene(Scene):
     def construct(self):
         self.camera.background_color = "#1c1c1c"
         title = Text("Sine from a Circle", font_size=44).to_edge(UP, buff=0.4)
-        self.play(Write(title))
+        self.play(Write(title), run_time=2)
 
         R = 2.0
         center = np.array([-3.6, 0.2, 0])
@@ -252,141 +138,28 @@ class VideoScene(Scene):
         moving_sine_dot = always_redraw(get_sine_dot)
         moving_trace = always_redraw(get_trace)
 
-        self.play(Create(circle))
-        self.play(Create(axes))
+        self.play(Create(circle), run_time=2)
+        self.play(Create(axes), run_time=2)
         self.add(moving_dot, moving_radius, moving_projection, moving_sine_dot, moving_trace)
         self.play(t.animate.set_value(TAU), run_time=8, rate_func=linear)
         self.wait(1)
 ```
 Lesson: drive EVERYTHING from one ValueTracker; nothing is hand-positioned, so
-rotation and tracing stay perfectly in sync.
-
-MOTION B - several rotating arrows joined head-to-tail; the sum tip is the
-result (a rotating-vector-sum / Fourier intuition). Same single-tracker pattern:
-
-```python
-from manim import *
-
-class VideoScene(Scene):
-    def construct(self):
-        self.camera.background_color = "#1c1c1c"
-        title = Text("Adding Rotating Arrows", font_size=44).to_edge(UP, buff=0.4)
-        self.play(Write(title))
-
-        freqs = [1, 2, 3]
-        lengths = [2.0, 1.0, 0.5]
-        colors = [RED, BLUE, GREEN]
-        origin = np.array([-4.2, 0, 0])
-        t = ValueTracker(0.0)
-
-        def sum_tip(angle):
-            tip = origin.copy()
-            for f, length in zip(freqs, lengths):
-                tip = tip + np.array([np.cos(f * angle), np.sin(f * angle), 0]) * length
-            return tip
-
-        def get_vectors():
-            angle = t.get_value()
-            vectors = VGroup()
-            tip = origin
-            for f, length, color in zip(freqs, lengths, colors):
-                end = tip + np.array([np.cos(f * angle), np.sin(f * angle), 0]) * length
-                vectors.add(Arrow(tip, end, color=color, buff=0, stroke_width=6))
-                tip = end
-            return vectors
-
-        def get_tip():
-            return Dot(sum_tip(t.get_value()), color=GOLD, radius=0.12)
-
-        vectors = always_redraw(get_vectors)
-        tip = always_redraw(get_tip)
-        self.add(vectors, tip)
-        self.play(t.animate.set_value(TAU), run_time=8, rate_func=linear)
-        self.wait(1)
-```
-Lesson: chains of related moving parts belong in a single always_redraw that
-returns a VGroup; the tracked value stays a plain number so any number of
-arrows can share it.
+rotation and tracing stay perfectly in sync. Chains of related moving parts
+belong in a single always_redraw that returns a VGroup.
 """
 
-# These are intentionally compact adaptations of official MIT-licensed Manim CE
-# examples. They teach scene structure without spending the free-tier budget on
-# large copied source files.
-QUALITY_FEW_SHOTS = r"""QUALITY FEW-SHOT PATTERNS
-
-PATTERN A - semantic equation bridge:
-```python
-left = MathTex(r"{{a}}^2 + {{b}}^2 = {{c}}^2", font_size=42)
-right = MathTex(r"{{c}}^2 = {{a}}^2 + {{b}}^2", font_size=42)
-left.to_edge(UP, buff=1.0)
-right.move_to(left)
-self.play(Write(left))
-self.wait(0.5)
-self.play(TransformMatchingTex(left, right))
-self.play(Indicate(left))
-```
-Lesson: preserve matching semantic fragments and show one algebraic move at a time.
-
-PATTERN B - mechanism creates a graph:
-```python
-axes = Axes(x_range=[0, 2 * PI, PI / 2], y_range=[-1.2, 1.2, 1], x_length=5.0, y_length=3.0)
-dot = Dot(axes.c2p(0, 0), color=RED)
-curve = VMobject(color=PURPLE).set_points_as_corners([axes.c2p(0, 0)])
-projection = DashedLine(dot.get_center(), axes.c2p(0, 0), color=GREEN)
-self.play(Create(axes), FadeIn(dot))
-self.play(Create(projection), Create(curve))
-self.play(dot.animate.move_to(axes.c2p(PI / 2, 1)), run_time=2, rate_func=linear)
-self.play(Indicate(curve))
-```
-Lesson: make the plotted quantity visibly arise from a concrete measurement.
-
-PATTERN C - invariant after variation:
-```python
-axes = Axes(x_range=[1, 5, 1], y_range=[0, 6, 1], x_length=5.0, y_length=3.0)
-point = Dot(axes.c2p(2, 4), color=RED)
-formula = MathTex(r"x y = 8", font_size=42, color=YELLOW).to_edge(DOWN, buff=0.5)
-self.play(Create(axes), FadeIn(point))
-self.play(point.animate.move_to(axes.c2p(4, 2)), run_time=2)
-self.play(Write(formula), Circumscribe(formula))
-```
-Lesson: let the viewer see inputs change before naming the conserved relationship.
-
-PATTERN D - circle area through the same pieces:
-```python
-circle = Circle(radius=1.6, color=BLUE).shift(LEFT * 3)
-sectors = VGroup(*[
-    Sector(outer_radius=1.6, angle=TAU / 16, start_angle=i * TAU / 16,
-           fill_color=BLUE, fill_opacity=0.8, stroke_color=WHITE).shift(LEFT * 3)
-    for i in range(16)
-])
-formula = MathTex(r"A = \\pi r^2", font_size=42).to_edge(DOWN, buff=0.45)
-self.play(Create(circle))
-self.play(ReplacementTransform(circle, sectors), run_time=2)
-self.play(Write(formula), Circumscribe(formula))
-```
-Lesson: move the same filled pieces from a source circle into a clearly separated
-alternating row/parallelogram. Never overlay triangles on the original circle or
-replace the result with an unrelated square.
-
-PATTERN E - slow educational pacing:
-```python
-title = Text("Gradient Descent", font_size=44, color=WHITE).to_edge(UP)
-curve = axes.plot(lambda x: (x - 2) ** 2, color=BLUE)
-dot = Dot(axes.c2p(4, 4), color=RED)
-arrow = Arrow(dot.get_center(), axes.c2p(2.5, 2.25), color=GREEN)
-label = MathTex(r"\\nabla f", font_size=36, color=GREEN).next_to(arrow, RIGHT)
-
-self.play(Write(title), run_time=2)                          # slow title
-self.play(Create(axes), Create(curve), run_time=3)           # slow curve build
-self.wait(1)                                                 # let viewer absorb
-self.play(FadeIn(dot), run_time=2)                           # slow dot appear
-self.wait(1)
-self.play(Create(arrow), Write(label), run_time=3)           # slow gradient arrow
-self.wait(2)                                                 # hold before next idea
-```
-Lesson: every `self.play` has an explicit `run_time` ≥ 2. Every beat ends with
-`self.wait(1)` or `self.wait(2)`. Nothing appears in under 2 seconds. The viewer
-always has time to read labels and understand the visual before the next change.
+QUALITY_PATTERNS = """\
+QUALITY PATTERNS (apply the lessons, no code needed):
+- Semantic equation bridge: TransformMatchingTex(left, right) — one algebraic move at a \
+time; never replace a formula with an unrelated one without a visible bridge.
+- Mechanism creates the graph: introduce the concrete moving object, show its \
+measurement/projection, THEN plot the graph as the record of that measurement — the graph \
+is a consequence, not decoration.
+- Invariant after variation: let the viewer see inputs change BEFORE writing the conserved \
+relationship; Circumscribe/Indicate the formula when it lands.
+- Circle area through the same pieces: transform filled Sector pieces out of the circle \
+into a separated alternating row — never overlay the pieces on the original circle.
 """
 
 COMPACT_FEW_SHOT = r"""COMPACT EXAMPLE - three non-overlapping sub-plots:
@@ -424,27 +197,19 @@ No explanations, no markdown fences, nothing but valid Python.
 
 HARD RULES:
 - The file defines exactly one class: `class VideoScene(Scene)` with `def construct(self):`. \
-No other top-level code.
-- from manim import * is already available; still include it explicitly.
-- Total animation time (sum of run_time + waits) MUST be close to the stated audio duration: \
-pace animations so visuals stay synchronized with what is being said. Add intermediate \
-self.wait() calls if needed. Never end with a long freeze longer than 1 second.
-- VISUAL DENSITY: introduce or meaningfully animate something new every 4-6 seconds. \
-Static stretches longer than 4 seconds are forbidden. If the narration mentions several \
-things (object A grows, then B appears, then they combine), your animation must show EACH \
-of those beats, timed roughly when they are spoken.
+No other top-level code. `from manim import *` is already available; still include it explicitly.
+- Total animation time (sum of run_time + waits) MUST be close to the stated audio duration. \
+Visualize EVERY clause of the narration: if it mentions N things, N visual groups appear, \
+timed roughly when they are spoken.
 - Shapes alone are not enough: pair every key shape with a short label, value or equation \
 (MathTex/Text). Keep the scene title visible for the ENTIRE scene.
-- Fill the frame: compose 2-4 visual regions (e.g. left diagram / right equation), not one \
-small lonely object in the center.
-- Do NOT fade out everything at the very end.
 - Every method you call must exist in the cheat-sheet above or be plain Python/numpy.
 - All LaTeX must compile: wrap in MathTex, escape braces properly.
 - Keep code deterministic: no randomness without a seed.
 
 {MOTION_FEW_SHOTS}
 
-{QUALITY_FEW_SHOTS}
+{QUALITY_PATTERNS}
 
 {COMPACT_FEW_SHOT}
 """

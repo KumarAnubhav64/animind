@@ -46,7 +46,7 @@ _SLOT_GRID = [
 
 DIRECTIONS = {"up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT"}
 
-SHAPES_2D = {"circle", "square", "dot", "triangle", "diamond", "ring"}
+SHAPES_2D = {"circle", "square", "dot", "triangle", "diamond", "ring", "arrow"}
 SHAPES_3D = {"sphere", "cube", "cylinder", "cone", "torus"}
 SHAPES = SHAPES_2D | SHAPES_3D
 
@@ -359,6 +359,7 @@ class SpecCompiler:
             "triangle": f"Triangle(radius=0.9 * {scale:.2f}, color={color})",
             "diamond": f"Polygon([0,1,0],[1,0,0],[0,-1,0],[-1,0,0], color={color}).scale({scale:.2f})",
             "ring": f"Circle(radius=0.9 * {scale:.2f}, color={color}).set_stroke(width=6)",
+            "arrow": f"Arrow(ORIGIN, UP * 2.0 * {scale:.2f}, color={color}, buff=0, stroke_width=4, max_tip_length_to_length_ratio=0.35)",
         }
         # 3D shapes
         constructors_3d = {
@@ -375,6 +376,12 @@ class SpecCompiler:
             self.emit(f"{_var(a.id)} = {constructors_2d[shape]}")
         else:
             self.emit(f"{_var(a.id)} = {constructors_2d['circle']}")
+        # Rotate arrow to face the requested direction (default is UP)
+        if shape == "arrow" and a.direction:
+            _arrow_dir = {"up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT"}.get(a.direction.lower(), "UP")
+            if _arrow_dir != "UP":
+                _angle = {"DOWN": "PI", "LEFT": "PI / 2", "RIGHT": "-PI / 2"}.get(_arrow_dir, "0")
+                self.emit(f"{_var(a.id)}.rotate({_angle})")
         x, y = self._fit_and_place(_var(a.id), a)
         self.boxes[a.id] = (x, y)
         self.regions[a.id] = (a.region or "center").lower()

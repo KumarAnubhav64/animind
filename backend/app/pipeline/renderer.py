@@ -2,6 +2,7 @@ import asyncio
 import ast
 import glob
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -9,9 +10,23 @@ import uuid
 from pathlib import Path
 
 
+_PLAIN_SCENE_CLASS_RE = re.compile(r"class\s+VideoScene\s*\(\s*Scene\s*\)")
+
+
+def _ensure_moving_camera(code: str) -> str:
+    """`self.camera.frame` exists only on MovingCameraScene; on a plain Scene
+    it crashes at render time with 'Camera' object has no attribute 'frame'
+    (the most common LLM codegen crash). Rewriting the base class is
+    deterministic, idempotent, and always safe — MovingCameraScene subclasses
+    Scene, so scenes that never touch the camera are unaffected."""
+    if "self.camera.frame" in code:
+        code = _PLAIN_SCENE_CLASS_RE.sub("class VideoScene(MovingCameraScene)", code)
+    return code
+
+
 def normalize_manim_code(code: str) -> str:
     """Apply deterministic compatibility fixes before invoking Manim CE."""
-    return (
+    return _ensure_moving_camera(
         code.replace("set_start_and_end_points(", "put_start_and_end_on(")
         .replace("UP.rotate(", "rotate_vector(UP, ")
         .replace("DOWN.rotate(", "rotate_vector(DOWN, ")
@@ -123,6 +138,45 @@ def detect_opacity_zero_then_fade_in(tree: ast.AST) -> str | None:
     return None
 
 
+def _uses_self_camera_frame(tree: ast.AST) -> bool:
+    """True when the code reads `self.camera.frame` (a MovingCameraScene-only
+    attribute)."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "frame"
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "camera"
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == "self"
+        ):
+            return True
+    return False
+
+
+def detect_camera_frame_on_plain_scene(tree: ast.AST) -> str | None:
+    """Backstop for camera code the regex normalizer cannot fix (e.g. a base
+    class written as `manim.Scene` or an alias). `self.camera.frame` on a
+    plain Scene raises 'Camera' object has no attribute 'frame' at render."""
+    if not _uses_self_camera_frame(tree):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "VideoScene":
+            bases = [
+                base.id
+                for base in node.bases
+                if isinstance(base, ast.Name)
+            ]
+            if "MovingCameraScene" not in bases:
+                return (
+                    "Invalid Manim: `self.camera.frame` requires the scene class to "
+                    "inherit MovingCameraScene — write `class VideoScene(MovingCameraScene)`, "
+                    "or drop the camera calls and zoom by scaling/moving the mobjects "
+                    "themselves. (`self.camera.background_color` is fine on any Scene.)"
+                )
+    return None
+
+
 def validate_visual_code(code: str) -> str | None:
     """Full deterministic validation of a complete scene before rendering.
 
@@ -140,6 +194,9 @@ def validate_visual_code(code: str) -> str | None:
     structure_error = validate_scene_structure(tree)
     if structure_error:
         return structure_error
+    camera_error = detect_camera_frame_on_plain_scene(tree)
+    if camera_error:
+        return camera_error
     get_area_error = detect_get_area_misuse(tree)
     if get_area_error:
         return get_area_error

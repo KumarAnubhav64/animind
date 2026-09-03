@@ -12,8 +12,12 @@ construct that definitely exists (see allowed API below).
 - Common causes: invented methods, bad LaTeX (escape backslashes in Python strings), \
 missing imports, positioning errors (points outside [-7,7] x [-4,4]), Color "BROWN" (undefined), \
 Text vs MathTex confusion. In Manim CE, update a Line with \
-`put_start_and_end_on(start, end)`; `set_start_and_end_points` is invalid.
-Direction constants such as `UP` are NumPy arrays, so use `rotate_vector(UP, angle)` \
+`put_start_and_end_on(start, end)`; `set_start_and_end_points` is invalid. \
+`self.camera.frame` exists ONLY on MovingCameraScene — if the error is \
+"'Camera' object has no attribute 'frame'", either declare \
+`class VideoScene(MovingCameraScene)` or remove the `self.camera.frame` calls and zoom \
+by scaling/moving the mobjects instead (`self.camera.background_color` is fine on any \
+Scene). Direction constants such as `UP` are NumPy arrays, so use `rotate_vector(UP, angle)` \
 instead of `UP.rotate(angle)`. Never return a `Hello, World!` placeholder.
 If visual QA rejects the composition, make the narrated transformation visibly different: \
 for circle area use filled Sector pieces and animate the same pieces away from the circle \

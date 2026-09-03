@@ -12,6 +12,7 @@ from app.pipeline.renderer import (
     normalize_manim_code,
     preflight_visual_code,
     render_manim,
+    validate_visual_code,
 )
 from app.pipeline.spec_compiler import compile_spec
 from app.pipeline.treatment import _layout_diagram
@@ -39,6 +40,50 @@ def test_renderer_rejects_empty_code_and_removes_stale_video(tmp_path: Path):
 
 def test_renderer_normalizes_legacy_line_updater_method():
     assert normalize_manim_code("line.set_start_and_end_points(a, b)") == "line.put_start_and_end_on(a, b)"
+
+
+def test_normalize_upgrades_plain_scene_to_moving_camera():
+    # `self.camera.frame` on a plain Scene is the classic render crash
+    # ('Camera' object has no attribute 'frame') — the normalizer must fix it
+    # deterministically, without an LLM round-trip.
+    code = (
+        "from manim import *\n\n"
+        "class VideoScene(Scene):\n"
+        "    def construct(self):\n"
+        '        self.camera.background_color = "#1c1c1c"\n'
+        "        self.play(self.camera.frame.animate.scale(0.7), run_time=2)\n"
+    )
+    fixed = normalize_manim_code(code)
+    assert "class VideoScene(MovingCameraScene):" in fixed
+    assert validate_visual_code(fixed) is None
+    # Idempotent: a second pass changes nothing.
+    assert normalize_manim_code(fixed) == fixed
+
+
+def test_validate_rejects_camera_frame_on_exotic_plain_scene():
+    # The regex normalizer cannot rewrite `manim.Scene` — the AST backstop
+    # must catch it and hand the fixer an actionable message.
+    code = (
+        "import manim\n\n"
+        "class VideoScene(manim.Scene):\n"
+        "    def construct(self):\n"
+        "        self.play(self.camera.frame.animate.scale(0.7), run_time=2)\n"
+    )
+    err = validate_visual_code(normalize_manim_code(code))
+    assert err is not None
+    assert "MovingCameraScene" in err
+
+
+def test_validate_accepts_camera_frame_on_moving_camera_scene():
+    code = (
+        "from manim import *\n\n"
+        "class VideoScene(MovingCameraScene):\n"
+        "    def construct(self):\n"
+        '        self.camera.background_color = "#1c1c1c"\n'
+        "        self.play(self.camera.frame.animate.scale(0.7), run_time=2)\n"
+        "        self.wait(1)\n"
+    )
+    assert validate_visual_code(code) is None
 
 
 def test_renderer_normalizes_numpy_direction_rotation_and_rejects_placeholder():
@@ -502,7 +547,7 @@ def test_fit_to_budget_trims_only_when_over_and_keeps_head_tail():
     # Fits fine: untouched.
     assert _fit_to_budget(messages, max_tokens=2048, max_input_tokens=10_000) == messages
 
-    # Exceeds the ceiling: human turn is trimmed, head/tail markers survive,
+    # Exceeds the ceiling: the human turn is trimmed, head/tail markers survive,
     # and the estimated input+max_tokens fits under Groq's 8000 cap.
     trimmed = _fit_to_budget([("system", system), ("human", human)], max_tokens=2048, max_input_tokens=2048)
     assert trimmed != messages
@@ -511,9 +556,40 @@ def test_fit_to_budget_trims_only_when_over_and_keeps_head_tail():
     assert "[content trimmed to fit token budget]" in human_t
     assert len(human_t) < len(human)
 
-    # System turns are never trimmed away.
+    # The system turn survives as a (possibly truncated) system turn.
     assert trimmed[0][0] == "system"
-    assert trimmed[0][1] == system
+    assert trimmed[0][1]
+
+
+def test_fit_to_budget_drops_few_shot_sections_before_anything_else():
+    from app.agents.llm import _fit_to_budget, _estimate_tokens
+
+    core = "You are an expert Manim animator. Follow the house style rules.\n"
+    tail = (
+        "MOTION FEW-SHOT (continuous, 3B1B-style motion)\n\n"
+        + "```python\nclass VideoScene(Scene):\n    pass\n```\n" * 40
+    )
+    system = core + tail
+    messages = [("system", system), ("human", "Scene title: test\nNarration: short")]
+
+    # Ceiling that only the few-shot tail exceeds: the core rules survive and
+    # the few-shot block is dropped entirely.
+    trimmed = _fit_to_budget(messages, max_tokens=2048, max_input_tokens=100)
+    assert trimmed[0][1].startswith(core.rstrip()[:40])
+    assert "MOTION FEW-SHOT" not in trimmed[0][1]
+    assert _estimate_tokens(trimmed[0][1]) < _estimate_tokens(system)
+
+
+def test_fit_to_budget_hard_trims_headerless_system_when_needed():
+    from app.agents.llm import _fit_to_budget
+
+    # A system prompt with no droppable sections must still shrink (level 2)
+    # rather than shipping over the cap.
+    system = "sys " * 4000  # ~2000 tokens, no few-shot headers
+    messages = [("system", system), ("human", "narration")]
+    trimmed = _fit_to_budget(messages, max_tokens=2048, max_input_tokens=300)
+    assert trimmed[0][1] != system
+    assert "system prompt truncated" in trimmed[0][1]
 
 
 def test_fit_to_budget_estimates_tokens_without_tiktoken():
