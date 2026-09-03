@@ -34,7 +34,7 @@ COLORS = {
     "gold", "white", "grey", "gray", "pink",
 }
 SHAPES = {
-    "circle", "square", "dot", "triangle", "diamond", "ring",
+    "circle", "square", "dot", "triangle", "diamond", "ring", "arrow",
     "sphere", "cube", "cylinder", "cone", "torus",
 }
 
@@ -230,6 +230,10 @@ async def math_review(spec: SceneSpec, narration: str, issues: list[str]) -> lis
     """Subject-expert LLM review; returns a list of surgical fixes ([] on any
     failure — the gate is fail-open)."""
     from app.agents.scene_graph import llm_with_retry
+    from app.agents.reference_db import lookup_reference
+
+    _ref = lookup_reference(narration, spec.title)
+    _ref_block = ("\n\n" + _ref) if _ref else ""
 
     messages = [
         ("system", REVIEW_SYSTEM_PROMPT),
@@ -241,6 +245,7 @@ async def math_review(spec: SceneSpec, narration: str, issues: list[str]) -> lis
             f"{spec.model_dump_json()}\n\n"
             "Deterministic findings (confirm these are real, fix if possible):\n"
             + ("\n".join(f"- {i}" for i in issues) if issues else "- none")
+            + _ref_block
             + "\n\nReview the mathematics and return ONLY the JSON object described above.",
         ),
     ]

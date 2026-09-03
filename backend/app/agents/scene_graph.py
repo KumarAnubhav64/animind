@@ -6,8 +6,18 @@ from typing import Any, Awaitable, Callable, Literal, TypedDict
 from langgraph.graph import END, StateGraph
 from moviepy import AudioFileClip
 
-from app.agents.llm import _fit_to_budget, _CODER_MAX_TOKENS, _FIXER_MAX_TOKENS, coder_llm, fallback_llm, fixer_llm
+from app.agents.llm import (
+    _fit_to_budget,
+    _CODER_MAX_TOKENS,
+    _FIXER_MAX_TOKENS,
+    coder_llm,
+    fallback_llm,
+    fixer_llm,
+    spec_llm,
+)
 from app.agents.tts import synthesize_speech
+from app.agents.reference_db import lookup_reference
+from app.agents.example_memory import lookup_example
 from app.config import get_settings
 from app.pipeline.renderer import normalize_manim_code, render_manim, validate_visual_code
 from app.pipeline.telemetry import record as _record_call
@@ -25,6 +35,20 @@ logger = logging.getLogger("animind.scene")
 
 def _model_name(llm) -> str:
     return getattr(llm, "model_name", None) or getattr(llm, "model", None) or str(llm)
+
+
+def _append_example_memory(msg: str, *texts: str) -> str:
+    """Append a distilled MIT-gallery example card to the very TAIL of a human
+    message. `_fit_to_budget` trims from the middle (head + tail survive), so a
+    tail-appended card outlives the static few-shots that live in the system
+    prompt and are the first thing dropped under the 8k budget."""
+    settings = get_settings()
+    if not settings.example_memory_enabled:
+        return msg
+    _ex = lookup_example(*texts, max_entries=settings.example_memory_max_entries)
+    if not _ex:
+        return msg
+    return msg.rstrip() + "\n\n" + _ex
 
 
 async def llm_with_retry(
@@ -57,6 +81,27 @@ async def llm_with_retry(
         except Exception as e:  # noqa: BLE001
             last_err = e
             message = str(e).lower()
+            # Oversized request (413): waiting cannot help, and Groq labels it
+            # rate_limit_exceeded, so this MUST be checked before the generic
+            # rate-limit wait below — otherwise we burn minutes resubmitting
+            # identical over-cap bytes. Shrink the payload and retry now.
+            from app.agents.llm import (
+                _GROQ_REQUEST_CAP,
+                _GROQ_REQUEST_MARGIN,
+                _is_oversized_request,
+            )
+
+            if _is_oversized_request(e) and i < attempts - 1:
+                mt = getattr(llm, "max_tokens", None) or _CODER_MAX_TOKENS
+                ceiling = max(256, _GROQ_REQUEST_CAP - _GROQ_REQUEST_MARGIN - mt - 800 * (i + 1))
+                refit = _fit_to_budget(messages, mt, max_input_tokens=ceiling)
+                if refit != messages:
+                    logger.warning(
+                        "request oversized (attempt %s/%s); refitting payload to ~%s input tokens",
+                        i + 1, attempts, ceiling,
+                    )
+                    messages = refit
+                    continue
             # A daily cap will not recover during this request. Retrying it
             # only delays the fallback and consumes another provider call.
             if "tokens per day" in message or "tpd" in message:
@@ -207,7 +252,7 @@ async def synth_tts(state: SceneState) -> dict[str, Any]:
 async def generate_spec(state: SceneState) -> dict[str, Any]:
     """Tier 1: declarative SceneSpec -> deterministic Manim code (compiled)."""
     from app.pipeline.spec_compiler import compile_spec
-    from app.pipeline.treatment import generate_treatment
+    from app.pipeline.treatment import generate_treatment, layout_preview
     from app.prompts.spec_coder import (
         SPEC_CODER_SYSTEM_PROMPT,
         SpecCode,
@@ -240,6 +285,10 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
         state.get("context") or "",
         muted=state.get("muted", False),
     )
+    # Inject verified reference data if the topic matches a known entry
+    _ref = lookup_reference(state["title"], state["narration"], state.get("visual_description") or "")
+    if _ref:
+        msg = msg + "\n\n" + _ref
     parsed: SceneSpec | None = None
     max_spec_retries = 2
     spec_issues: list[str] = []
@@ -257,7 +306,7 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                     + "\n\nYou MUST fix every issue above. Re-emit the FULL corrected spec."
                 )
             parsed = await structured_call(
-                coder_llm(),
+                spec_llm(),
                 [
                     ("system", SPEC_CODER_SYSTEM_PROMPT),
                     ("human", human_msg),
@@ -280,7 +329,14 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
         await _progress(
             f"Structured {len(parsed.beats)} beats into a declarative spec ({len(parsed.beats)} action groups); compiling to Manim code."
         )
-        # Stream the spec JSON to the frontend
+        # Stream the spec JSON + resolved spatial layout to the frontend
+        preview = layout_preview(parsed)
+        n_regions = len(preview["regions"])
+        layout_summary = (
+            f"{n_regions} named region(s)"
+            if n_regions
+            else "regions derive from action coordinates"
+        )
         await _publish(
             project_id,
             {
@@ -289,8 +345,11 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                 "scene_idx": state.get("scene_idx", 0),
                 "agent": "SpecCoder",
                 "node": "specgen",
-                "message": f"Generated spec with {len(parsed.beats)} beats",
-                "details": {"spec_json": parsed.dump_clean_json(indent=2)},
+                "message": f"Generated spec with {len(parsed.beats)} beats — layout blueprint ({layout_summary}).",
+                "details": {
+                    "spec_json": parsed.dump_clean_json(indent=2),
+                    "layout": preview,
+                },
             },
         )
         code = compile_spec(parsed, state.get("audio_duration"))
@@ -407,15 +466,25 @@ async def generate_code(state: SceneState, feedback: str = "") -> dict[str, Any]
         state.get("context") or "",
         muted=state.get("muted", False),
     )
+    # Inject verified reference data if the topic matches a known entry
+    _ref = lookup_reference(state["title"], state["narration"], state.get("visual_description") or "")
+    if _ref:
+        msg = msg + "\n\n" + _ref
     feedback = (feedback or "").strip()
     if len(feedback) > 1500:
         feedback = feedback[:1500] + " …[truncated]"
+    human_msg = f"{msg}\n\nAddress this quality feedback:\n{feedback}" if feedback else msg
+    # Tail-appended house-style gallery card for the CURRENT scene (dynamic few-shot).
+    human_msg = _append_example_memory(
+        human_msg,
+        state["title"], state["narration"], state.get("visual_description") or "",
+    )
     response = await llm_with_retry(
         coder_llm(),
         _fit_to_budget(
             [
                 ("system", CODER_SYSTEM_PROMPT),
-                ("human", f"{msg}\n\nAddress this quality feedback:\n{feedback}" if feedback else msg),
+                ("human", human_msg),
             ],
             _CODER_MAX_TOKENS,
         ),
@@ -430,21 +499,26 @@ async def generate_code(state: SceneState, feedback: str = "") -> dict[str, Any]
 
 
 async def fix_code(state: SceneState) -> dict[str, Any]:
+    # Match on the renderer error too, so API-name tags (MoveAlongPath, get_area,
+    # self.camera.frame, ...) pull the right gallery card for the repair.
+    fixer_human = _append_example_memory(
+        fixer_user_prompt(
+            state["code"] or "",
+            state["error"] or "",
+            state["attempts"],
+            state.get("context") or "",
+            muted=state.get("muted", False),
+        ),
+        state["title"], state["narration"],
+        state.get("visual_description") or "",
+        state["error"] or "",
+    )
     response = await llm_with_retry(
         fixer_llm(state["attempts"]),
         _fit_to_budget(
             [
                 ("system", FIXER_SYSTEM_PROMPT),
-                (
-                    "human",
-                    fixer_user_prompt(
-                        state["code"] or "",
-                        state["error"] or "",
-                        state["attempts"],
-                        state.get("context") or "",
-                        muted=state.get("muted", False),
-                    ),
-                ),
+                ("human", fixer_human),
             ],
             _FIXER_MAX_TOKENS,
         ),

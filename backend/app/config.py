@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     research_enabled: bool = True  # web-search the topic before the Writer plans
     research_results_per_query: int = 4
 
+    example_memory_enabled: bool = True  # inject a distilled MIT gallery card into raw codegen/Fixer
+    example_memory_max_entries: int = 1  # cards per lookup (1 keeps the ~8k token budget intact)
+
     media_dir: str = "media"
     database_url: str = "animind.db"
 
