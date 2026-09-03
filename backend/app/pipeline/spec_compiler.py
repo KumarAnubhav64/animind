@@ -10,7 +10,7 @@ import math
 import textwrap
 from pathlib import Path
 
-from app.schemas.spec import SceneSpec, SpecAction
+from app.schemas.spec import LayoutRegion, SceneLayout, SceneSpec, SpecAction
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 
@@ -122,8 +122,36 @@ class SpecCompiler:
         self.visual_count = 0
         self.use_3d = False  # auto-set when 3D shapes are used
         self.axes_ids: set[str] = set()  # ids created via add_axes (valid add_curve targets)
+        # Named regions from the spec's spatial blueprint. Each becomes a box
+        # (center_x, center_y, half_w, half_h): explicit at:[x,y] wins as the
+        # anchor, otherwise the anchor of the region's AREA. Half-extents come
+        # from the area's REGIONS box so objects referenced by name are fit and
+        # slotted INSIDE that region instead of silently falling back to center.
+        self.layout_boxes: dict[str, tuple[float, float, float, float]] = {}
+        if spec.layout and spec.layout.regions:
+            for r in spec.layout.regions:
+                area = (r.area or "center").lower()
+                anchor = REGIONS.get(area)
+                hw, hh = (anchor[2], anchor[3]) if anchor else (6.0, 2.1)
+                cx = r.at[0] if r.at and len(r.at) >= 2 else (anchor[0] if anchor else 0.0)
+                cy = r.at[1] if r.at and len(r.at) >= 2 else (anchor[1] if anchor else 0.0)
+                self.layout_boxes[(r.name or "").lower()] = (cx, cy, hw, hh)
 
     # ---------------------------------------------------------------- helpers
+
+    def _region_box(self, region_ref: str | None) -> tuple[float, float, float, float]:
+        """Resolve a region reference to a placement box.
+
+        Priority: (1) a named region from the spec's layout blueprint, (2) a
+        REGIONS area key, (3) the center default. This is what makes the spec
+        layout authoritative — objects that reference a named region land in
+        THAT region's coordinates instead of defaulting to center."""
+        ref = (region_ref or "center").strip().lower()
+        if ref in self.layout_boxes:
+            return self.layout_boxes[ref]
+        if ref in REGIONS:
+            return REGIONS[ref]
+        return REGIONS["center"]
 
     def emit(self, line: str, run_time: float = 0.0):
         self.lines.append("        " + line)
@@ -144,13 +172,13 @@ class SpecCompiler:
             base = 1.0 * scale
             if not (action.at and len(action.at) >= 2):
                 # Region-placed shapes grow to fill the region (see _fit fill).
-                _, _, hw, hh = REGIONS.get((action.region or "center").lower(), REGIONS["center"])
+                _, _, hw, hh = self._region_box(action.region)
                 base = max(base, min(2 * hw - 0.45, 2 * hh - 0.35) / 2.0)
             return base, base  # circle, square, triangle, diamond
         if op == "add_asset":
             base = 0.6 * scale
             if not (action.at and len(action.at) >= 2):
-                _, _, hw, hh = REGIONS.get((action.region or "center").lower(), REGIONS["center"])
+                _, _, hw, hh = self._region_box(action.region)
                 base = max(base, min(2 * hw - 0.45, 2 * hh - 0.35) / 2.0)
             return base, base
         if op in {"add_axes", "add_bars"}:
@@ -189,7 +217,7 @@ class SpecCompiler:
         """Search for the nearest non-overlapping position within the region."""
         if not self._overlaps_any(x, y, hw, hh):
             return x, y
-        cx, cy, r_hw, r_hh = REGIONS.get(region.lower(), REGIONS["center"])
+        cx, cy, r_hw, r_hh = self._region_box(region)
         # Search in an expanding spiral from the requested position
         for radius in (0.8, 1.5, 2.2, 3.0):
             for angle_deg in range(0, 360, 30):
@@ -207,7 +235,7 @@ class SpecCompiler:
 
     def _slot_position(self, region: str) -> tuple[float, float]:
         """Next free position inside a region box (collision-free by design)."""
-        cx, cy, hw, hh = REGIONS.get(region.lower(), REGIONS["center"])
+        cx, cy, hw, hh = self._region_box(region)
         n = self.slots_used.get(region.lower(), 0)
         self.slots_used[region.lower()] = n + 1
         fx, fy = _SLOT_GRID[n % len(_SLOT_GRID)]
@@ -226,7 +254,7 @@ class SpecCompiler:
         return f"move_to([{x:.2f}, {y:.2f}, 0])", x, y
 
     def _region_limits(self, region: str | None) -> tuple[float, float]:
-        _cx, _cy, hw, hh = REGIONS.get((region or "center").lower(), REGIONS["center"])
+        _cx, _cy, hw, hh = self._region_box(region)
         return max(1.2, 2 * hw - 0.45), max(0.7, 2 * hh - 0.35)
 
     def _fit_and_place(self, var: str, action: SpecAction) -> tuple[float, float]:
@@ -737,3 +765,102 @@ class SpecCompiler:
 
 def compile_spec(spec: SceneSpec, target_duration: float | None = None) -> str:
     return SpecCompiler(spec, target_duration).compile()
+
+
+# ------------------------------------------------------------ layout inference
+
+_PERSISTENT_OPS = {
+    "add_text", "add_equation", "add_shape", "add_asset", "add_axes", "add_bars",
+}
+
+# Canonical left-to-right/top-to-bottom display order for derived regions.
+_AREA_ORDER = [
+    "top_left", "top", "top_right",
+    "left", "center", "right",
+    "bottom_left", "bottom", "bottom_right",
+]
+
+_AREA_KEYWORDS = [
+    "top_left", "top_right", "bottom_left", "bottom_right",
+    "top", "bottom", "left", "right", "center",
+]
+
+
+def _resolve_area(ref: str | None) -> str:
+    """Map a region string to the REGIONS area key it belongs to."""
+    ref = (ref or "").strip().lower()
+    if ref in REGIONS:
+        return ref
+    for area in _AREA_KEYWORDS:
+        if area in ref:
+            return area
+    return "center"
+
+
+def _nearest_area(x: float, y: float) -> str:
+    """Area whose REGIONS anchor is closest to the explicit coordinate."""
+    best, best_d = "center", float("inf")
+    for area, (ax, ay, _hw, _hh) in REGIONS.items():
+        d = (x - ax) ** 2 + (y - ay) ** 2
+        if d < best_d:
+            best, best_d = area, d
+    return best
+
+
+def derive_layout(spec: SceneSpec) -> SceneSpec:
+    """Guarantee every scene spec carries a spatial layout.
+
+    When the spec already defines layout regions it is returned untouched.
+    Otherwise a deterministic blueprint is derived from where the actions
+    actually place content (named region references, explicit at:[x,y]
+    coordinates, or the regionless default), producing one region per used
+    AREA anchored at the compiler's REGIONS anchor. This mirrors exactly how
+    the compiler would slot those objects, so compilation is unchanged while
+    the spec always has a layout that is shown and used."""
+    if spec.layout and spec.layout.regions:
+        return spec
+    buckets: dict[str, dict[str, list[str]]] = {}
+    first_seen: list[str] = []
+    for beat in spec.beats:
+        for action in beat.actions:
+            if action.op not in _PERSISTENT_OPS or not action.id:
+                continue
+            token = (action.region or "").strip().lower()
+            if token:
+                area = _resolve_area(token)
+            elif action.at and len(action.at) >= 2:
+                area = _nearest_area(action.at[0], action.at[1])
+            else:
+                area = "center"
+            bucket = buckets.setdefault(area, {"ids": [], "tokens": []})
+            if area not in first_seen:
+                first_seen.append(area)
+            if action.id not in bucket["ids"]:
+                bucket["ids"].append(action.id)
+            if token and token not in bucket["tokens"]:
+                bucket["tokens"].append(token)
+    if not first_seen:
+        first_seen = ["center"]
+        buckets["center"] = {"ids": [], "tokens": []}
+    ordered = sorted(
+        first_seen,
+        key=lambda a: _AREA_ORDER.index(a) if a in _AREA_ORDER else len(_AREA_ORDER),
+    )
+    regions = []
+    for area in ordered:
+        bucket = buckets[area]
+        anchor = REGIONS[area]
+        name = (bucket["tokens"][0] if bucket["tokens"] else f"{area}_area")
+        regions.append(
+            LayoutRegion(
+                name=name,
+                area=area,
+                at=[anchor[0], anchor[1]],
+                description=", ".join(bucket["ids"]) or "",
+            )
+        )
+    layout = SceneLayout(
+        regions=regions,
+        notes="Auto-derived blueprint from the scene's action coordinates and regions.",
+    )
+    return spec.model_copy(update={"layout": layout})

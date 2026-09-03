@@ -251,7 +251,7 @@ async def synth_tts(state: SceneState) -> dict[str, Any]:
 
 async def generate_spec(state: SceneState) -> dict[str, Any]:
     """Tier 1: declarative SceneSpec -> deterministic Manim code (compiled)."""
-    from app.pipeline.spec_compiler import compile_spec
+    from app.pipeline.spec_compiler import compile_spec, derive_layout
     from app.pipeline.treatment import generate_treatment, layout_preview
     from app.prompts.spec_coder import (
         SPEC_CODER_SYSTEM_PROMPT,
@@ -315,6 +315,13 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                 project_id=project_id,
             )
             spec_issues = parsed.validate_ids()
+            if not (parsed.layout and parsed.layout.regions):
+                spec_issues.append(
+                    "the spec is missing its spatial layout (layout.regions) — you MUST define "
+                    "at least one named region with an explicit at:[x,y] center before writing "
+                    "actions. The compiler places every object that references a region at that "
+                    "region's coordinates."
+                )
             if not spec_issues:
                 break
             if spec_attempt < max_spec_retries:
@@ -326,6 +333,9 @@ async def generate_spec(state: SceneState) -> dict[str, Any]:
                 "scene %s: spec still has %s issues after %s retries — proceeding anyway",
                 scene_id, len(spec_issues), max_spec_retries,
             )
+        # Guarantee a spatial layout exists even if the model kept omitting it —
+        # derive one deterministically from where the actions place content.
+        parsed = derive_layout(parsed)
         await _progress(
             f"Structured {len(parsed.beats)} beats into a declarative spec ({len(parsed.beats)} action groups); compiling to Manim code."
         )

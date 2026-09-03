@@ -159,3 +159,155 @@ def test_compiler_multi_element_side_by_side():
     assert "move_to([3.40, 0.00, 0])" in code
     assert "sin(x)" in code
     assert "mathcheck" not in code  # this is spec compiler, not graph
+
+
+def _spec_with_regions(title, actions):
+    return SceneSpec(
+        title=title,
+        layout=SceneLayout(
+            regions=[
+                LayoutRegion(name="left_area", area="left", at=[-3.4, 0.0]),
+                LayoutRegion(name="right_area", area="right", at=[3.4, 0.0]),
+                LayoutRegion(name="center_area", area="center", at=[0.0, 0.0]),
+            ]
+        ),
+        beats=[{"description": "action beat", "actions": actions}],
+    )
+
+
+def test_compiler_places_named_region_at_its_layout_coordinates():
+    """Actions referencing a layout region BY NAME land at that region's at anchor,
+    not the REGIONS center fallback (the overlap bug this guards against)."""
+    from app.pipeline.spec_compiler import compile_spec
+
+    spec = _spec_with_regions(
+        "Named regions",
+        [
+            {"op": "set_title", "text": "Named regions"},
+            {"op": "add_shape", "id": "hero_l", "shape": "circle", "color": "red", "region": "left_area"},
+            {"op": "add_shape", "id": "hero_r", "shape": "circle", "color": "blue", "region": "right_area"},
+            {"op": "add_shape", "id": "hero_c", "shape": "circle", "color": "green", "region": "center_area"},
+        ],
+    )
+    code = compile_spec(spec, 12.0)
+    assert "m_hero_l.move_to([-3.40, 0.00, 0])" in code
+    assert "m_hero_r.move_to([3.40, 0.00, 0])" in code
+    assert "m_hero_c.move_to([0.00, 0.00, 0])" in code
+
+
+def test_compiler_named_region_fill_uses_region_box_not_center_band():
+    """Region-placed (no at) shapes size to the referenced region's box extents
+    (left/right are 4.75x3.45), proving the layout box drives the fit, not the
+    whole-band center default (5.55x3.05)."""
+    from app.pipeline.spec_compiler import compile_spec
+
+    spec = _spec_with_regions(
+        "Fill per region",
+        [
+            {"op": "set_title", "text": "Fill per region"},
+            {"op": "add_shape", "id": "hero_l", "shape": "circle", "color": "red", "region": "left_area"},
+            {"op": "add_shape", "id": "hero_r", "shape": "circle", "color": "blue", "region": "right_area"},
+            {"op": "add_shape", "id": "hero_c", "shape": "circle", "color": "green", "region": "center_area"},
+        ],
+    )
+    code = compile_spec(spec, 8.0)
+    assert "_fit(m_hero_l, 4.75, 3.45, True)" in code
+    assert "m_hero_l.move_to([-3.40, 0.00, 0])" in code
+
+
+def test_compiler_area_keyword_still_resolves_without_layout_region():
+    """Bare area words (left/center/...) keep working when no layout names match."""
+    from app.pipeline.spec_compiler import compile_spec
+
+    spec = SceneSpec(
+        title="Bare area",
+        beats=[
+            {
+                "description": "Area keywords",
+                "actions": [
+                    {"op": "set_title", "text": "Areas"},
+                    {"op": "add_shape", "id": "left_obj", "shape": "square", "color": "red", "region": "left"},
+                    {"op": "add_shape", "id": "right_obj", "shape": "square", "color": "blue", "region": "right"},
+                    {"op": "add_shape", "id": "center_obj", "shape": "circle", "color": "green", "region": "center"},
+                ],
+            }
+        ],
+    )
+    code = compile_spec(spec, 8.0)
+    assert "m_left_obj.move_to([-3.40, -0.40, 0])" in code
+    assert "m_right_obj.move_to([3.40, -0.40, 0])" in code
+
+
+def test_derive_layout_injects_regions_when_spec_has_none():
+    from app.pipeline.spec_compiler import compile_spec, derive_layout
+
+    spec = SceneSpec(
+        title="No layout",
+        beats=[
+            {
+                "description": "Content placed across areas",
+                "actions": [
+                    {"op": "set_title", "text": "Derived"},
+                    {"op": "add_shape", "id": "a", "shape": "circle", "color": "red", "region": "left"},
+                    {"op": "add_shape", "id": "b", "shape": "circle", "color": "blue", "region": "right"},
+                    {"op": "add_text", "id": "c", "text": "center note", "region": "center"},
+                ],
+            }
+        ],
+    )
+    assert spec.layout is None
+    derived = derive_layout(spec)
+    assert derived is not spec
+    assert derived.layout is not None
+    names = {r.name for r in derived.layout.regions}
+    assert names == {"left", "right", "center"}
+    by_name = {r.name: r for r in derived.layout.regions}
+    assert by_name["left"].at == [-3.4, -0.4]
+    assert by_name["right"].at == [3.4, -0.4]
+    # deterministic: calling again yields an identical layout
+    again = derive_layout(derived)
+    assert again.layout.model_dump() == derived.layout.model_dump()
+    # and compilation output is untouched by the derived layout
+    assert compile_spec(derived) == compile_spec(spec)
+
+
+def test_derive_layout_groups_by_proximity_to_region_anchor():
+    """Explicit at coords bucket objects into the area whose anchor is nearest,
+    and custom region keywords resolve to their matching area."""
+    from app.pipeline.spec_compiler import compile_spec, derive_layout
+
+    spec = SceneSpec(
+        title="Pictograph",
+        beats=[
+            {
+                "description": "Two groups",
+                "actions": [
+                    {"op": "set_title", "text": "Pictograph"},
+                    {"op": "add_text", "id": "sun", "text": "☀", "region": "left_area", "at": [-3.0, 0.0]},
+                    {"op": "add_text", "id": "tree", "text": "🌳", "region": "right_area", "at": [3.0, 0.0]},
+                    {"op": "add_text", "id": "cap", "text": "caption", "at": [0.0, -2.4]},
+                ],
+            }
+        ],
+    )
+    derived = derive_layout(spec)
+    names = {r.name for r in derived.layout.regions}
+    assert names == {"left_area", "right_area", "bottom_area"}
+    by_name = {r.name: r for r in derived.layout.regions}
+    assert by_name["left_area"].area == "left"
+    assert by_name["right_area"].area == "right"
+    assert "cap" in by_name["bottom_area"].description
+    assert compile_spec(derived) == compile_spec(spec)
+
+
+def test_derive_layout_keeps_existing_layout_untouched():
+    from app.pipeline.spec_compiler import derive_layout
+
+    spec = SceneSpec(
+        title="Has layout",
+        layout=SceneLayout(
+            regions=[LayoutRegion(name="custom", area="left", at=[-2.0, 1.0], description="hand tuned")]
+        ),
+        beats=[{"description": "b", "actions": [{"op": "set_title", "text": "T"}]}],
+    )
+    assert derive_layout(spec) is spec  # returned unchanged when regions exist
