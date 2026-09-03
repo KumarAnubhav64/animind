@@ -279,6 +279,111 @@ def test_detect_invalid_manim_patterns_accepts_valid_usage():
     assert detect_invalid_manim_patterns(tree) is None
 
 
+def test_validate_rejects_keep_in_frame_before_later_placement():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'def _keep_in_frame(m):\n'
+        '    return m\n'
+        'def node(shape, position):\n'
+        '    _fit(shape, 5.55, 3.05, True)\n'
+        '    _keep_in_frame(shape)\n'
+        '    shape.move_to(position)\n'
+        '    return shape\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        a = node(Circle(), [-3.0, 0, 0])\n'
+        '        self.play(Create(a))\n'
+    )
+    assert err is not None
+    assert "_keep_in_frame" in err
+    assert "move_to" in err
+
+
+def test_validate_accepts_keep_in_frame_after_final_placement():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        c = Circle()\n'
+        '        c.move_to([-3.0, 0, 0])\n'
+        '        _keep_in_frame(c)\n'
+        '        self.play(Create(c))\n'
+    )
+    assert err is None
+
+
+def test_validate_accepts_repositioning_after_object_has_been_shown():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        c = Circle()\n'
+        '        c.move_to([-3.0, 0, 0])\n'
+        '        _keep_in_frame(c)\n'
+        '        self.play(Create(c))\n'
+        '        self.play(FadeOut(c))\n'
+        '        c2 = Circle()\n'
+        '        c2.move_to([3.0, 0, 0])\n'
+        '        _keep_in_frame(c2)\n'
+        '        self.play(Create(c2))\n'
+    )
+    assert err is None
+
+
+def test_validate_rejects_overlapping_whole_band_fills():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'def _fit(m, w, h, fill=False):\n'
+        '    return m\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        a = RoundedRectangle(width=2, height=1)\n'
+        '        b = RoundedRectangle(width=2, height=1)\n'
+        '        _fit(a, 5.55, 3.05, True)\n'
+        '        _fit(b, 5.55, 3.05, True)\n'
+        '        a.move_to([0.00, -0.40, 0])\n'
+        '        b.move_to([1.24, -0.40, 0])\n'
+        '        self.play(Create(a), Create(b))\n'
+    )
+    assert err is not None
+    assert "overlap" in err or "draw on top" in err
+    assert "_fit" in err
+
+
+def test_validate_accepts_single_whole_band_fill():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'def _fit(m, w, h, fill=False):\n'
+        '    return m\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        hero = Square()\n'
+        '        _fit(hero, 5.55, 3.05, True)\n'
+        '        hero.move_to([0.00, -0.40, 0])\n'
+        '        _keep_in_frame(hero)\n'
+        '        self.play(Create(hero))\n'
+    )
+    assert err is None
+
+
+def test_validate_accepts_distinct_sized_region_fills():
+    err = validate_visual_code(
+        'from manim import *\n'
+        'def _fit(m, w, h, fill=False):\n'
+        '    return m\n'
+        'class VideoScene(Scene):\n'
+        '    def construct(self):\n'
+        '        left = Square()\n'
+        '        right = Square()\n'
+        '        _fit(left, 4.75, 3.45, True)\n'
+        '        _fit(right, 5.55, 3.05, True)\n'
+        '        left.move_to([-3.4, -0.4, 0])\n'
+        '        right.move_to([3.4, -0.4, 0])\n'
+        '        self.play(Create(left), Create(right))\n'
+    )
+    assert err is None
+
+
 def test_layout_diagram_handles_region_models():
     spec = SceneSpec(
         title="t",

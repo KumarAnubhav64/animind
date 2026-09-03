@@ -22,6 +22,13 @@ If an object's top is above y = 1.2, put its label BELOW or beside it, never sta
 elements >= 1.2). Scale "unit" objects up so they visually dominate. Compose 2-4 balanced \
 regions (e.g. left diagram / right equation); never one small object in the center, and never \
 everything piled into one corner.
+- NODE SIZING + KEEP ORDER (non-negotiable): a whole-band `_fit(x, 5.55, 3.05, fill=True)` \
+upscale is ONLY for a single hero shape. When several boxes share a frame, each gets its own \
+footprint (RoundedRectangle width ~2.6-3.0, height ~0.9-1.6) — do NOT `_fit` every node to the \
+full 5.55x3.05 band, or the side-by-side nodes draw on top of each other. And `_keep_in_frame(x)` \
+clamps x wherever it sits at call time, so call every `.move_to`/`.next_to`/`.shift` FIRST and \
+make `_keep_in_frame(x)` the LAST positioning call on x — a keep followed by a later bare move \
+is silently undone and can push the node out of frame.
 - One idea on screen at a time; build up with Write/FadeIn/Create; prefer Transform over \
 remove-and-replace for related content.
 - Use MathTex (LaTeX) for formulas; double-escape backslashes in Python strings.

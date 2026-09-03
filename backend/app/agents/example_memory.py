@@ -448,12 +448,18 @@ class VideoScene(Scene):
         ),
         apis=("RoundedRectangle", "Arrow", "MoveAlongPath", "scale_to_fit_width", "VGroup"),
         lesson=(
-            "Build each node as a VGroup(RoundedRectangle + Text) and SCALE the label to fit "
-            "INSIDE its box with scale_to_fit_width, then keep every node well inside the "
-            "frame (|x| <= 6.1). Connect the boxes edge-to-edge with Arrow(node1.get_right(), "
-            "node2.get_left(), buff=0.25) — never leave nodes unconnected. Reveal nodes "
-            "first, then edges, then send a Dot down each arrow with MoveAlongPath so the "
-            "trigger visibly launches the chain."
+            "Build each node as a VGroup(RoundedRectangle + Text) with a per-node footprint "
+            "~2.6-3.0 wide by ~0.9 tall (RoundedRectangle(width=2.9, height=0.85)) and SCALE the "
+            "label to fit INSIDE its box with scale_to_fit_width. NEVER stretch every node up to "
+            "the full 5.55x3.05 frame band with a fill=True _fit — that size is reserved for a "
+            "single hero shape; several full-band nodes placed side by side always overlap. "
+            "Place each node with .move_to([x, y, 0]) and keep every node well inside the frame "
+            "(|x| <= 6.1, y >= -1.5) — order the layout so .move_to/.next_to runs FIRST and "
+            "_keep_in_frame(node) is the LAST positioning call per node, because a keep before a "
+            "later move is silently undone by the move. Connect the boxes edge-to-edge with "
+            "Arrow(node1.get_right(), node2.get_left(), buff=0.25) — never leave nodes "
+            "unconnected. Reveal nodes first, then edges, then send a Dot down each arrow with "
+            "MoveAlongPath so the trigger visibly launches the chain."
         ),
         code=r'''
 from manim import *

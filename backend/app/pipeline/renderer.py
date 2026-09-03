@@ -12,6 +12,13 @@ from pathlib import Path
 
 _PLAIN_SCENE_CLASS_RE = re.compile(r"class\s+VideoScene\s*\(\s*Scene\s*\)")
 
+# Mobject methods that permanently place/reposition an object. `_keep_in_frame`
+# clamps whatever position the object has at call time, so a placement after a
+# keep (with no animation in between) silently undoes the clamping.
+_PLACEMENT_METHODS = {"move_to", "next_to", "shift", "align_to", "to_edge", "to_corner", "move"}
+_KEEP_HELPER = "_keep_in_frame"
+_FIT_HELPER = "_fit"
+
 
 def _ensure_moving_camera(code: str) -> str:
     """`self.camera.frame` exists only on MovingCameraScene; on a plain Scene
@@ -138,6 +145,187 @@ def detect_opacity_zero_then_fade_in(tree: ast.AST) -> str | None:
     return None
 
 
+def _is_keep_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == _KEEP_HELPER
+    )
+
+
+def _iter_scoped_statements(fn: ast.AST):
+    """Yield the statements of a function body in source order, descending into
+    compound statements but never into a nested function/class definition
+    (nested definitions are analyzed separately with their own state)."""
+    for stmt in fn.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield stmt
+        if isinstance(stmt, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+            for inner in (
+                list(stmt.body)
+                + list(getattr(stmt, "orelse", []) or [])
+                + list(getattr(stmt, "finalbody", []) or [])
+            ):
+                if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                yield inner
+            for handler in getattr(stmt, "handlers", []) or []:
+                for inner in handler.body:
+                    if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        continue
+                    yield inner
+
+
+def _assigned_names(stmt: ast.AST) -> list[str]:
+    names: list[str] = []
+    for target in getattr(stmt, "targets", []) or []:
+        for node in ast.walk(target):
+            if isinstance(node, ast.Name):
+                names.append(node.id)
+    return names
+
+
+def detect_keep_before_placement(tree: ast.AST) -> str | None:
+    """Reject `_keep_in_frame(x)` that is immediately undone by a later bare
+    `x.move_to(...)`/`x.next_to(...)`/... before `x` is ever shown.
+
+    `_keep_in_frame` clamps the object at the position it has *at call time*,
+    so a placement afterwards (with no animation in between) silently moves the
+    object out of the safe band and lets it overlap other content. Keeps must
+    come after the final placement of an object, as the last positioning step.
+    """
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        pending: dict[str, int] = {}
+        for stmt in _iter_scoped_statements(fn):
+            if isinstance(stmt, ast.Assign):
+                for name in _assigned_names(stmt):
+                    pending.pop(name, None)
+                if _is_keep_call(stmt.value) and stmt.value.args:
+                    target = stmt.value.args[0]
+                    if isinstance(target, ast.Name):
+                        pending[target.id] = stmt.lineno
+                continue
+            if not isinstance(stmt, ast.Expr) or not isinstance(stmt.value, ast.Call):
+                continue
+            call = stmt.value
+            if _is_keep_call(call):
+                if call.args and isinstance(call.args[0], ast.Name):
+                    pending[call.args[0].id] = stmt.lineno
+                continue
+            func = call.func
+            if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+                continue
+            if func.attr in {"play", "add", "add_foreground_mobject"}:
+                for node in ast.walk(call):
+                    if isinstance(node, ast.Name):
+                        pending.pop(node.id, None)
+                continue
+            if func.attr not in _PLACEMENT_METHODS or _chain_contains_animate(func):
+                continue
+            if func.value.id in pending:
+                keep_line = pending.pop(func.value.id)
+                return (
+                    f"Invalid Manim (line {stmt.lineno}): `{func.value.id}` is repositioned with "
+                    f"`.{func.attr}` at line {stmt.lineno}, but it was already clamped by "
+                    f"`_keep_in_frame({func.value.id})` at line {keep_line} before ever appearing "
+                    "on screen. `_keep_in_frame` only clamps the object's current position, so "
+                    f"the later `.move_to`/`.next_to` undoes it and can push `{func.value.id}` "
+                    "out of the frame or overlapping other content. Place every "
+                    "`move_to`/`next_to`/`shift`/`align_to` BEFORE `_keep_in_frame`, and call "
+                    "`_keep_in_frame` as the last positioning step for each object."
+                )
+            pending.pop(func.value.id, None)
+    return None
+
+
+def _literal_position(node: ast.AST) -> tuple[float, float] | None:
+    if isinstance(node, (ast.List, ast.Tuple)):
+        try:
+            values = [ast.literal_eval(item) for item in node.elts]
+        except (ValueError, TypeError, SyntaxError):
+            return None
+        if (
+            len(values) >= 2
+            and all(isinstance(v, (int, float)) for v in values[:2])
+        ):
+            return float(values[0]), float(values[1])
+    return None
+
+
+def detect_overlapping_band_fills(tree: ast.AST) -> str | None:
+    """Reject several mobjects each `_fit`-scaled with fill=True to the full
+    frame band and then placed at overlapping positions.
+
+    A whole-band fill (`w >= 4.0` or `h >= 2.0`) is for a single hero shape.
+    When several nodes are each scaled to the full band (~5.55x3.05) and laid
+    out side by side they necessarily draw on top of one another.
+    """
+    fills: list[tuple[str, float, float, int]] = []
+    for call in ast.walk(tree):
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == _FIT_HELPER
+            and len(call.args) >= 4
+        ):
+            continue
+        name, width, height, fill = call.args[:4]
+        if not (
+            isinstance(name, ast.Name)
+            and isinstance(width, ast.Constant)
+            and isinstance(height, ast.Constant)
+            and isinstance(fill, ast.Constant)
+            and fill.value is True
+        ):
+            continue
+        if not isinstance(width.value, (int, float)) or not isinstance(height.value, (int, float)):
+            continue
+        if width.value >= 4.0 or height.value >= 2.0:
+            fills.append((name.id, float(width.value), float(height.value), call.lineno))
+    if len(fills) < 2:
+        return None
+
+    placements: dict[str, tuple[float, float]] = {}
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr == "move_to"
+            and isinstance(func.value, ast.Name)
+            and call.args
+        ):
+            continue
+        pos = _literal_position(call.args[0])
+        if pos and func.value.id not in placements:
+            placements[func.value.id] = pos
+
+    placed = [fill for fill in fills if fill[0] in placements]
+    for i in range(len(placed)):
+        for j in range(i + 1, len(placed)):
+            n1, w1, h1, _ = placed[i]
+            n2, w2, h2, _ = placed[j]
+            if abs(w1 - w2) > 0.01 or abs(h1 - h2) > 0.01:
+                continue
+            x1, y1 = placements[n1]
+            x2, y2 = placements[n2]
+            if abs(x1 - x2) < (w1 + w2) / 2 and abs(y1 - y2) < (h1 + h2) / 2:
+                return (
+                    f"Invalid Manim (line {placed[j][3]}): `{n2}` is `_fit`-scaled with fill=True "
+                    f"to the full {w1:g}x{h1:g} frame band, and so is `{n1}` (line {placed[i][3]}) "
+                    f"— but the two are placed at overlapping spots ({x1:g},{y1:g}) and "
+                    f"({x2:g},{y2:g}), so they draw on top of each other. A whole-band fill is for "
+                    "a single hero shape. When several mobjects share a frame, scale each to its "
+                    "own footprint (roughly 2.5-3.0 wide) with a per-node cap like "
+                    "`_fit(x, 2.6, 1.6, fill=True)` and spread their centers apart."
+                )
+    return None
+
+
 def _uses_self_camera_frame(tree: ast.AST) -> bool:
     """True when the code reads `self.camera.frame` (a MovingCameraScene-only
     attribute)."""
@@ -203,6 +391,12 @@ def validate_visual_code(code: str) -> str | None:
     pattern_error = detect_invalid_manim_patterns(tree)
     if pattern_error:
         return pattern_error
+    keep_error = detect_keep_before_placement(tree)
+    if keep_error:
+        return keep_error
+    overlap_error = detect_overlapping_band_fills(tree)
+    if overlap_error:
+        return overlap_error
     return detect_opacity_zero_then_fade_in(tree)
 
 
